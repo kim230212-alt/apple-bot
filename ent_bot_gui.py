@@ -20,6 +20,14 @@ from ent_bot_config import BotConfig
 from ent_bot_engine import BotEngine
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# 자동 로그인 설정
+try:
+    from auto_login import ALL_SERVERS, load_config as load_login_config, save_config as save_login_config
+    _HAS_AUTO_LOGIN = True
+except ImportError:
+    _HAS_AUTO_LOGIN = False
+    ALL_SERVERS = []
 CONFIG_PATH = os.path.join(BASE_DIR, "ent_config.json")
 
 
@@ -157,6 +165,40 @@ class BotGUI:
                                              command=self._on_checkbox_toggle)
         patrol_rand_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 8))
         row += 1
+
+        # ── 자동 로그인 설정 ──
+        if _HAS_AUTO_LOGIN:
+            login_cfg = load_login_config()
+
+            ttk.Label(inner, text="── 자동 로그인 ──", font=("", 9, "bold")).grid(
+                row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
+            row += 1
+
+            auto_login_var = tk.BooleanVar(value=login_cfg.get("auto_login", True))
+            self._auto_login_var = auto_login_var
+            ttk.Checkbutton(inner, text="게임 미실행 시 자동 접속", variable=auto_login_var).grid(
+                row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
+            row += 1
+
+            ttk.Label(inner, text="서버:").grid(row=row, column=0, sticky="w", padx=4, pady=1)
+            self._login_server_var = tk.StringVar(value=login_cfg.get("server", ""))
+            server_combo = ttk.Combobox(inner, textvariable=self._login_server_var,
+                                        values=ALL_SERVERS, width=10, state="readonly")
+            server_combo.grid(row=row, column=1, sticky="ew", padx=4, pady=1)
+            row += 1
+
+            ttk.Label(inner, text="캐릭터:").grid(row=row, column=0, sticky="w", padx=4, pady=1)
+            self._login_char_var = tk.IntVar(value=login_cfg.get("character", 1))
+            char_frame = ttk.Frame(inner)
+            char_frame.grid(row=row, column=1, sticky="w", padx=4, pady=1)
+            for i in range(1, 4):
+                ttk.Radiobutton(char_frame, text=str(i), variable=self._login_char_var,
+                                value=i).pack(side="left")
+            row += 1
+
+            ttk.Separator(inner, orient="horizontal").grid(
+                row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=6)
+            row += 1
 
         for label_text, key in settings:
             if key is None:
@@ -316,6 +358,15 @@ class BotGUI:
                 self._append_log(f"[설정] 디바이스 변경 실패: {e}")
 
         self.config.save(CONFIG_PATH)
+
+        # 자동 로그인 설정도 저장
+        if _HAS_AUTO_LOGIN and hasattr(self, '_login_server_var'):
+            login_cfg = load_login_config()
+            login_cfg["server"] = self._login_server_var.get()
+            login_cfg["character"] = self._login_char_var.get()
+            login_cfg["auto_login"] = self._auto_login_var.get()
+            save_login_config(login_cfg)
+
         self._append_log("[설정] 저장 완료")
 
     # ──────────────────────────────────────────
