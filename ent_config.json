@@ -1,0 +1,96 @@
+{
+  "patrol_zone": [
+    297,
+    44,
+    1609,
+    767
+  ],
+  "keyboard_device": 2,
+  "ocr_interval": 0.5,
+  "patrol_dist": 500,
+  "patrol_dist_up": 200,
+  "max_patrol_steps": 5,
+  "patrol_random": false,
+  "motion_size": 30,
+  "motion_threshold": 10.0,
+  "move_wait_sec": 2.0,
+  "approach_wait_sec": 1.5,
+  "attack_interval": 0.2,
+  "npc_gone_timeout": 1.5,
+  "scan_interval": 0.05,
+  "npc_not_found_timeout": 300.0,
+  "weight_check_interval": 30.0,
+  "drag_dist": 80,
+  "atk_confirm_timeout": 2.5,
+  "reattack_fail_max": 3,
+  "escape_retry_max": 3,
+  "approach_fail_max": 3,
+  "close_enough": 80,
+  "scroll_key": "f10",
+  "scroll_click": [
+    49,
+    118
+  ],
+  "scroll_wait": 5.0,
+  "weight_pos": [
+    55,
+    866
+  ],
+  "player_pos": [
+    636,
+    340
+  ],
+  "chat_rect": [
+    220,
+    900,
+    520,
+    935
+  ],
+  "ocr_scan_rect": [
+    10,
+    53,
+    1272,
+    696
+  ],
+  "npc_name": "엔트",
+  "pickup_keyword": "정령의돌",
+  "pickup_conf": 0.4,
+  "warehouse_npc_click": [
+    854,
+    342
+  ],
+  "warehouse_deposit_click": [
+    92,
+    165
+  ],
+  "warehouse_ok_click": [
+    288,
+    555
+  ],
+  "warehouse_scroll_click": [
+    57,
+    122
+  ],
+  "warehouse_item_threshold": 0.7,
+  "use_clan_warehouse": true,
+  "clan_warehouse_scroll_click": [
+    54,
+    282
+  ],
+  "clan_warehouse_npc_click": [
+    714,
+    318
+  ],
+  "clan_warehouse_deposit_click": [
+    65,
+    323
+  ],
+  "clan_warehouse_ok_click": [
+    288,
+    555
+  ],
+  "stuck_history_size": 10,
+  "stuck_radius": 150,
+  "stuck_check_interval": 60.0,
+  "stuck_no_move_max": 8
+}

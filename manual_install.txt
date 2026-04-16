@@ -1,0 +1,42 @@
+========================================
+  ENT BOT Manual Install Guide
+========================================
+
+** Python 3.13은 PyTorch 미지원 **
+** 반드시 Python 3.11로 설치할 것 **
+
+1. CMD를 관리자 권한으로 실행
+2. 아래 명령어를 순서대로 실행
+
+----------------------------------------
+[1] Python 3.11 설치
+----------------------------------------
+아래 링크에서 다운로드 후 설치 (Add python.exe to PATH 체크!)
+https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+
+----------------------------------------
+[2] Python 패키지 설치
+----------------------------------------
+py -3.11 -m pip install --upgrade pip
+py -3.11 -m pip install numpy opencv-python pywin32 keyboard easyocr dxcam interception-python Pillow
+
+----------------------------------------
+[3] PyTorch CUDA 설치
+----------------------------------------
+py -3.11 -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+
+----------------------------------------
+[4] Interception 드라이버 설치
+----------------------------------------
+cd "C:\BOT\ent_bot_release\Interception\command line installer"
+install-interception.exe /install
+
+----------------------------------------
+[5] PC 재부팅
+----------------------------------------
+
+----------------------------------------
+[6] 봇 실행
+----------------------------------------
+cd "C:\BOT\ent_bot_release"
+py -3.11 ent_bot_gui.py

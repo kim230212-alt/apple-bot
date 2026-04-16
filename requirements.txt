@@ -1,0 +1,8 @@
+numpy
+opencv-python
+pywin32
+keyboard
+easyocr
+dxcam
+interception-python
+Pillow
