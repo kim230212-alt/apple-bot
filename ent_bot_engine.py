@@ -23,7 +23,7 @@ from ent_bot_config import BotConfig
 from capture_window import WindowCapture
 from interception import (
     move_to, mouse_down, mouse_up, auto_capture_devices,
-    click, press, key_down, key_up, set_devices,
+    click, press, key_down, key_up, set_devices, scroll,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -477,17 +477,42 @@ class BotEngine:
         self._scroll_return()
         self.log("[CLAN_WH] 혈맹 창고 루틴 완료")
 
-    def _deposit_items(self):
+    def _scroll_to_bottom(self, count=6):
+        """창고 아이템 목록을 맨 아래로 스크롤"""
+        self.log(f"    스크롤 다운 {count}회 (맨 아래로)")
+        for _ in range(count):
+            scroll("down")
+            time.sleep(0.3)
+
+    def _find_item_with_scroll(self, tmpl, name="item", max_scroll=6):
+        """현재 화면에서 아이템을 찾고, 없으면 스크롤 업하며 재검색"""
         frame = self._wincap.get_screenshot()
-        fruit_pos = self._find_item(frame, self._fruit_tmpl, "엔트의 열매")
+        pos = self._find_item(frame, tmpl, name)
+        if pos:
+            return pos
+        for i in range(1, max_scroll + 1):
+            self.log(f"    [{name}] 스크롤 업 {i}/{max_scroll}")
+            scroll("up")
+            time.sleep(0.5)
+            frame = self._wincap.get_screenshot()
+            pos = self._find_item(frame, tmpl, name)
+            if pos:
+                return pos
+        self.log(f"    [{name}] {max_scroll}회 스크롤 후에도 미발견")
+        return None
+
+    def _deposit_items(self):
+        # 먼저 맨 아래로 스크롤
+        self._scroll_to_bottom()
+
+        fruit_pos = self._find_item_with_scroll(self._fruit_tmpl, "엔트의 열매")
         if fruit_pos:
             self._click_move(fruit_pos)
             time.sleep(0.5)
             self._type_number("9999")
             time.sleep(0.3)
 
-        frame = self._wincap.get_screenshot()
-        stem_pos = self._find_item(frame, self._stem_tmpl, "엔트의 줄기")
+        stem_pos = self._find_item_with_scroll(self._stem_tmpl, "엔트의 줄기")
         if stem_pos:
             self._click_move(stem_pos)
             time.sleep(0.5)
