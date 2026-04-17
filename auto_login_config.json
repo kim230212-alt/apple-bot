@@ -1,6 +1,7 @@
 {
-  "server": "어레인",
+  "server": "사이하",
   "account": "",
   "password": "",
-  "character": 1
+  "character": 1,
+  "auto_login": true
 }

@@ -44,8 +44,8 @@ _SRV_LX = 0.431    # 좌측 열 x 비율
 _SRV_RX = 0.579    # 우측 열 x 비율
 _SRV_Y0 = 0.291    # 첫 행 y 비율 (보정)
 _SRV_DY = 0.0276   # 행 간격 비율 (보정)
-_PAGE2_X = 0.496   # 페이지2 버튼 x 비율
-_PAGE2_Y = 0.570   # 페이지2 버튼 y 비율
+_PAGE2_X = 0.650   # 페이지2 버튼 x 비율
+_PAGE2_Y = 0.866   # 페이지2 버튼 y 비율
 
 # 서버 → (페이지, 열, 행) 매핑
 SERVER_GRID = {}
@@ -211,6 +211,7 @@ def run_auto_login(cfg, log_fn):
     tmpl_agree = cv2.imread(f"{TMPL_DIR}/agree_btn.png")
     tmpl_ok    = cv2.imread(f"{TMPL_DIR}/ok_btn.png")
     tmpl_ok_login = cv2.imread(f"{TMPL_DIR}/ok_login_btn.png")
+    tmpl_page2 = cv2.imread(f"{TMPL_DIR}/page2_btn.png")
 
     def tmpl_find(frame, tmpl):
         """프레임에서 템플릿을 찾아 중심 (cx, cy, 신뢰도) 반환. 없으면 None."""
@@ -368,11 +369,13 @@ def run_auto_login(cfg, log_fn):
         log_fn(f"  서버 '{server}'가 목록에 없습니다.")
         return False
 
-    # 서버가 2페이지면 페이지 전환
+    # 서버가 2페이지면 페이지 전환 (템플릿 매칭)
     if page == 2:
         log_fn("  2페이지로 이동...")
-        p2_pos = ratio_pos(hwnd, _PAGE2_X, _PAGE2_Y)
-        click_at(hwnd, p2_pos)
+        if not wait_and_click_tmpl(hwnd, tmpl_page2, "2페이지 버튼", timeout=10):
+            log_fn("  2페이지 버튼 못 찾음 → 고정 좌표 시도")
+            p2_pos = ratio_pos(hwnd, _PAGE2_X, _PAGE2_Y)
+            click_at(hwnd, p2_pos)
         time.sleep(2)
         # 2페이지 화면 저장
         srv_frame2 = grab_frame(hwnd)

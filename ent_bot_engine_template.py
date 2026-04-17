@@ -102,17 +102,6 @@ class BotEngine:
     # 초기화
     # ──────────────────────────────────────────
     def initialize(self):
-        # ── 게임 미실행 시 자동 로그인 ──
-        try:
-            from auto_login import check_and_login, load_config as load_login_config
-            login_cfg = load_login_config()
-            if login_cfg.get("auto_login", True):
-                check_and_login(log_fn=self.log)
-            else:
-                self.log("[자동접속] 비활성화 → 스킵")
-        except Exception as e:
-            self.log(f"[자동접속] 모듈 로드 실패 (무시): {e}")
-
         self.log("디바이스 감지 중... (마우스 움직여주세요)")
         auto_capture_devices(keyboard=True, mouse=True, verbose=True)
 

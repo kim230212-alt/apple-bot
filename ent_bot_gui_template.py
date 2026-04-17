@@ -75,6 +75,10 @@ class BotGUI:
                                      foreground="#FFD700")
         self.state_label.pack(side="left", padx=8)
 
+        if _HAS_AUTO_LOGIN:
+            self.login_btn = ttk.Button(bar, text="자동 접속", command=self._on_auto_login)
+            self.login_btn.pack(side="left", padx=2)
+
         ttk.Label(bar, text="Template | F12=긴급종료", foreground="gray").pack(side="right")
 
     def _build_main(self):
@@ -254,6 +258,24 @@ class BotGUI:
     # ──────────────────────────────────────────
     # 버튼 핸들러
     # ──────────────────────────────────────────
+    def _on_auto_login(self):
+        """자동 접속 버튼 — 설정 저장 후 별도 스레드에서 실행"""
+        self._apply_settings()  # 현재 GUI 설정 저장
+        self.login_btn.configure(state="disabled")
+        self._append_log("[자동접속] 시작...")
+
+        def worker():
+            try:
+                from auto_login import run_auto_login, load_config as load_login_config
+                cfg = load_login_config()
+                run_auto_login(cfg, self._append_log)
+            except Exception as e:
+                self._append_log(f"[자동접속] 오류: {e}")
+            finally:
+                self.root.after(0, lambda: self.login_btn.configure(state="normal"))
+
+        threading.Thread(target=worker, daemon=True).start()
+
     def _on_start(self):
         self.engine.start()
         self.start_btn.configure(state="disabled")
