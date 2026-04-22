@@ -63,6 +63,8 @@ class BotEngine:
         self._last_npc_found_t = 0.0
         self._last_attack_t = 0.0
         self._last_weight_check_t = 0.0
+        self._last_hp_check_t = 0.0
+        self._last_hp_f8_t = 0.0
         self._last_stuck_check_t = 0.0
         self._last_atk_msg_t = 0.0
         self._last_atk_msg_y = None
@@ -80,6 +82,11 @@ class BotEngine:
         self._patrol_no_move_count = 0
         self._prev_player_roi = None
         self._dbg_cnt = 0
+        self._pickup_lmb_held = False   # 정령의 돌 줍기 중 LMB 유지 상태
+        self._last_pickup_name = "아이템"   # 직전 매칭된 픽업 템플릿 파일명
+        self._last_pickup_score = 0.0
+        self._last_pickup_anchor = None    # 직전 세션 anchor (window coord)
+        self._last_pickup_anchor_t = 0.0   # 직전 anchor 종료 시각
 
         # ── 스캐너 프로세스 (GIL 회피) ──
         self._scan_proc: Optional[mp.Process] = None
@@ -94,6 +101,10 @@ class BotEngine:
         self._restart_tmpl = None
         self._fruit_tmpl = None
         self._stem_tmpl = None
+        self._spirit_tmpl = None
+        self._mushroom_tmpl = None
+        self._mithril_tmpl = None
+        self._bark_tmpl = None
         self._chat_atk_tmpl = None
         self._chat_revive_tmpl = None
         self._initialized = False
@@ -156,6 +167,10 @@ class BotEngine:
         self._restart_tmpl = _load("restart_btn.png")
         self._fruit_tmpl = _load("ent_fruit.png")
         self._stem_tmpl = _load("ent_stem.png")
+        self._spirit_tmpl = _load("ent_spirit.png")
+        self._mushroom_tmpl = _load("ent_mushroom.png", required=False)
+        self._mithril_tmpl = _load("ent_mithril.png", required=False)
+        self._bark_tmpl = _load("ent_bark.png", required=False)
         self._chat_atk_tmpl = _load("chat_attack.png")
         self._chat_revive_tmpl = _load("chat_revive.png", required=False)
 
@@ -211,11 +226,13 @@ class BotEngine:
             self._scan_done = True
             npc = result['npc']
             pickup = result['pickup']
+            self._last_pickup_name = result.get('pickup_name') or "아이템"
+            self._last_pickup_score = result.get('pickup_score', 0.0)
             self._last_scan_results = result['debug_results']
             if npc is not None:
                 self.log(f"[TMPL] '{self.cfg.npc_name}' 발견 → ({npc[0]},{npc[1]})")
             if pickup is not None:
-                self.log(f"[PICKUP] 정령의 돌 → ({pickup[0]},{pickup[1]})")
+                self.log(f"[PICKUP] {self._last_pickup_name} score={self._last_pickup_score:.3f} → ({pickup[0]},{pickup[1]})")
             return npc, pickup
 
         self._scan_done = False
@@ -230,6 +247,7 @@ class BotEngine:
         self.log(f"[STATE] → {s}")
 
     def _click_move(self, win_pos):
+        self._pickup_release()  # 줍기 LMB 유지 중이면 안전 해제
         sx, sy = self._wincap.get_screen_position(win_pos)
         move_to(sx, sy)
         time.sleep(0.05)
@@ -237,7 +255,78 @@ class BotEngine:
         time.sleep(0.03)
         mouse_up("left")
 
+    def _pickup_click_hold(self, win_pos):
+        """정령의 돌 줍기 — LMB 유지 + 커서만 이동.
+        연속 줍기 시 캐릭터가 멈추지 않고 돌 사이를 부드럽게 이동."""
+        sx, sy = self._wincap.get_screen_position(win_pos)
+        move_to(sx, sy)
+        if not self._pickup_lmb_held:
+            time.sleep(0.05)
+            mouse_down("left")
+            self._pickup_lmb_held = True
+
+    def _pickup_release(self):
+        """_pickup_click_hold 로 눌러진 LMB 해제."""
+        if self._pickup_lmb_held:
+            mouse_up("left")
+            self._pickup_lmb_held = False
+
+    def _run_pickup_until_gone(self, initial_pos, max_duration=15.0,
+                               miss_confirm=4, stick_radius=100,
+                               anchor_reuse_dist=180, anchor_reuse_window=3.0):
+        """픽업 대상이 사라질 때까지 반복 클릭 + 재스캔.
+        초기 좌표 기준 stick_radius 내 재탐지만 '타겟 존재'로 간주 (드리프트 방지).
+        anchor 지속: 직전 세션 종료 후 anchor_reuse_window 초 내 + anchor_reuse_dist 이내면
+        직전 anchor 재사용 → 클러스터 픽업 시 캐릭터 왔다갔다 방지."""
+        now0 = time.time()
+        if (self._last_pickup_anchor is not None
+                and now0 - self._last_pickup_anchor_t < anchor_reuse_window):
+            lx, ly = self._last_pickup_anchor
+            ix0, iy0 = initial_pos
+            if (lx - ix0) ** 2 + (ly - iy0) ** 2 <= anchor_reuse_dist * anchor_reuse_dist:
+                self.log(f"[PICKUP] anchor 재사용 {initial_pos} → {self._last_pickup_anchor}")
+                initial_pos = self._last_pickup_anchor
+        self.log(f"[PICKUP] 연속 줍기 시작 → {self._last_pickup_name} pos={initial_pos}")
+        self._pickup_release()   # 혹시 유지 중인 LMB 해제
+        t0 = time.time()
+        miss = 0
+        click_count = 0
+        r2 = stick_radius * stick_radius
+        ix, iy = initial_pos
+        sx, sy = self._wincap.get_screen_position(initial_pos)
+        while self._running and time.time() - t0 < max_duration:
+            move_to(sx, sy)
+            time.sleep(0.04)
+            mouse_down("left")
+            time.sleep(0.03)
+            mouse_up("left")
+            click_count += 1
+            time.sleep(0.15)
+            frame = self._wincap.get_screenshot()
+            if frame is not None:
+                self._push_scan_frame(frame)
+            time.sleep(0.1)
+            _, pickup_new = self._find_npc()
+            if pickup_new is None:
+                miss += 1
+            else:
+                dx = pickup_new[0] - ix
+                dy = pickup_new[1] - iy
+                if dx * dx + dy * dy <= r2:
+                    miss = 0
+                    # 슬라이딩 anchor: 같은 아이템이 카메라 이동으로 화면에서 흐를 때 추적
+                    ix, iy = pickup_new
+                    sx, sy = self._wincap.get_screen_position(pickup_new)
+                else:
+                    miss += 1
+            if miss >= miss_confirm:
+                break
+        self._last_pickup_anchor = (ix, iy)
+        self._last_pickup_anchor_t = time.time()
+        self.log(f"[PICKUP] 연속 줍기 종료  클릭={click_count}회  경과={time.time()-t0:.1f}s")
+
     def _ctrl_drag_attack(self, win_pos):
+        self._pickup_release()  # 줍기 LMB 유지 중이면 안전 해제
         sx, sy = self._wincap.get_screen_position(win_pos)
         dx = int(self.cfg.drag_dist * 0.5)
         dy = int(self.cfg.drag_dist * 0.87)
@@ -280,6 +369,27 @@ class BotEngine:
             self.log(f"[WEIGHT] 무게 초과 감지! (빨강 비율={ratio:.2f})")
             return True
         return False
+
+    def _check_hp_green_and_press(self, frame):
+        """HP바가 초록이면 F8 (쿨타임 적용)"""
+        now = time.time()
+        if now - self._last_hp_check_t < self.cfg.hp_check_interval:
+            return
+        self._last_hp_check_t = now
+        hx, hy = self.cfg.hp_pos
+        roi = frame[hy - 3:hy + 3, hx - 5:hx + 5]
+        if roi.size == 0:
+            return
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = ((hsv[:, :, 0] >= 40) & (hsv[:, :, 0] <= 85)
+                & (hsv[:, :, 1] > 100) & (hsv[:, :, 2] > 80))
+        ratio = np.sum(mask) / mask.size
+        if ratio > 0.3:
+            if now - self._last_hp_f8_t < self.cfg.hp_f8_cooldown:
+                return
+            self._last_hp_f8_t = now
+            self.log(f"[HP] 초록 감지 → F8  (비율={ratio:.2f})")
+            press("f8")
 
     def _find_item(self, frame, tmpl, name="item"):
         result = cv2.matchTemplate(frame, tmpl, cv2.TM_CCOEFF_NORMED)
@@ -452,47 +562,51 @@ class BotEngine:
         self._scroll_return()
         self.log("[CLAN_WH] 혈맹 창고 루틴 완료")
 
-    def _scroll_to_bottom(self, count=6):
-        """창고 아이템 목록을 맨 아래로 스크롤"""
-        self.log(f"    스크롤 다운 {count}회 (맨 아래로)")
+    def _scroll_to_top(self, count=15):
+        """창고 아이템 목록을 맨 위로 스크롤"""
+        self.log(f"    스크롤 업 {count}회 (맨 위로)")
         for _ in range(count):
-            scroll("down")
-            time.sleep(0.3)
-
-    def _find_item_with_scroll(self, tmpl, name="item", max_scroll=6):
-        """현재 화면에서 아이템을 찾고, 없으면 스크롤 업하며 재검색"""
-        frame = self._wincap.get_screenshot()
-        pos = self._find_item(frame, tmpl, name)
-        if pos:
-            return pos
-        for i in range(1, max_scroll + 1):
-            self.log(f"    [{name}] 스크롤 업 {i}/{max_scroll}")
             scroll("up")
-            time.sleep(0.5)
+            time.sleep(0.2)
+
+    def _deposit_items(self, max_scroll_down=12):
+        """맨 위부터 아래로 스크롤하며 모든 대상 아이템을 맡긴다 (원패스)."""
+        items = [
+            (self._fruit_tmpl,    "엔트의 열매"),
+            (self._stem_tmpl,     "엔트의 줄기"),
+            (self._spirit_tmpl,   "정령의 돌"),
+            (self._mushroom_tmpl, "버섯포자의 즙"),
+            (self._mithril_tmpl,  "미스릴 원석"),
+            (self._bark_tmpl,     "엔트의 껍질"),
+        ]
+        enabled_names = {d["name"] for d in self.cfg.deposit_items if d.get("enabled", True)}
+        items = [(t, n) for t, n in items if t is not None and n in enabled_names]
+
+        self._scroll_to_top()
+        time.sleep(0.3)
+
+        deposited = set()
+        for step in range(max_scroll_down + 1):
             frame = self._wincap.get_screenshot()
-            pos = self._find_item(frame, tmpl, name)
-            if pos:
-                return pos
-        self.log(f"    [{name}] {max_scroll}회 스크롤 후에도 미발견")
-        return None
-
-    def _deposit_items(self):
-        # 먼저 맨 아래로 스크롤
-        self._scroll_to_bottom()
-
-        fruit_pos = self._find_item_with_scroll(self._fruit_tmpl, "엔트의 열매")
-        if fruit_pos:
-            self._click_move(fruit_pos)
-            time.sleep(0.5)
-            self._type_number("9999")
-            time.sleep(0.3)
-
-        stem_pos = self._find_item_with_scroll(self._stem_tmpl, "엔트의 줄기")
-        if stem_pos:
-            self._click_move(stem_pos)
-            time.sleep(0.5)
-            self._type_number("9999")
-            time.sleep(0.3)
+            for tmpl, name in items:
+                if name in deposited:
+                    continue
+                pos = self._find_item(frame, tmpl, name)
+                if pos:
+                    self._click_move(pos)
+                    time.sleep(0.5)
+                    self._type_number("9999")
+                    time.sleep(0.3)
+                    deposited.add(name)
+                    frame = self._wincap.get_screenshot()
+            if len(deposited) == len(items):
+                break
+            if step < max_scroll_down:
+                self.log(f"    스크롤 다운 {step+1}/{max_scroll_down}")
+                scroll("down")
+                time.sleep(0.4)
+        missing = [n for _, n in items if n not in deposited]
+        self.log(f"    맡기기 결과: 성공 {sorted(deposited)}  미발견 {missing}")
 
     def _scroll_return(self):
         self.log("[RETURN] 두루마리로 복귀 시작")
@@ -582,8 +696,9 @@ class BotEngine:
                     self._push_scan_frame(frame)
                     npc, pickup = self._find_npc()
                     if pickup is not None:
-                        self._click_move(pickup)
-                        time.sleep(1.0)
+                        self._run_pickup_until_gone(pickup)
+                    else:
+                        self._pickup_release()
                     if npc is not None:
                         self.npc_pos = npc
                         self._last_npc_seen_t = time.time()
@@ -629,6 +744,7 @@ class BotEngine:
     # 사망 / 부활 처리
     # ──────────────────────────────────────────
     def _handle_death(self, frame, restart_loc):
+        self._pickup_release()  # 줍기 LMB 유지 중이면 리셋
         rh, rw = self._restart_tmpl.shape[:2]
         rx = restart_loc[0] + rw // 2
         ry = restart_loc[1] + rh // 2
@@ -769,6 +885,7 @@ class BotEngine:
                         continue
                     key_up("ctrl")
                     mouse_up("left")
+                    self._pickup_lmb_held = False  # 대화창 처리로 LMB 해제됨 → 플래그 동기화
                     time.sleep(0.05)
                     key_down("esc")
                     time.sleep(0.1)
@@ -782,6 +899,9 @@ class BotEngine:
                         self._last_atk_msg_t = time.time()
                         self.log(f"[DIALOG] ESC 후 재공격  pos={self.npc_pos}")
                     continue
+
+            # ── HP 초록 감지 → F8 ──
+            self._check_hp_green_and_press(frame)
 
             # ── 무게 초과 ──
             if self.state in ("PATROL", "FIGHTING") and self._check_weight_red(frame):
@@ -811,6 +931,7 @@ class BotEngine:
         # 종료 정리
         key_up("ctrl")
         mouse_up("left")
+        self._pickup_lmb_held = False
         self.state = "IDLE"
         self.log("봇 중지됨")
 
@@ -820,8 +941,10 @@ class BotEngine:
     def _do_patrol(self, frame, now, elapsed):
         npc, pickup = self._find_npc()
         if pickup is not None:
-            self._click_move(pickup)
-            time.sleep(1.0)
+            self._run_pickup_until_gone(pickup)
+            return   # 사라질 때까지 줍고 나서 patrol 로직 진입 금지
+        else:
+            self._pickup_release()
         if npc is not None:
             self.npc_pos = npc
             self._last_npc_seen_t = now
@@ -903,7 +1026,7 @@ class BotEngine:
                     # 이동 중에도 스캔 결과 체크 (비블로킹)
                     npc_chk, pickup_chk = self._find_npc()
                     if pickup_chk is not None:
-                        self.log(f"[PICKUP] 정령의 돌 발견! 줍기  pos={pickup_chk}")
+                        self.log(f"[PICKUP] {self._last_pickup_name} 발견! 줍기  pos={pickup_chk}")
                         self._click_move(pickup_chk)
                         time.sleep(1.0)
                     if npc_chk is not None:
@@ -964,6 +1087,15 @@ class BotEngine:
             time.sleep(self.cfg.scan_interval)
 
     def _do_approach(self, frame, now, elapsed):
+        # 픽업 최우선: APPROACH 중이라도 아이템 보이면 중단하고 줍기
+        _, pickup = self._find_npc()
+        if pickup is not None:
+            self.log(f"[PICKUP] {self._last_pickup_name} 발견! 접근 중단 → 줍기  pos={pickup}")
+            self._run_pickup_until_gone(pickup)
+            return
+        else:
+            self._pickup_release()
+
         dlg_r = cv2.matchTemplate(frame, self._close_tmpl, cv2.TM_CCOEFF_NORMED)
         _, ds, _, _ = cv2.minMaxLoc(dlg_r)
         if ds >= 0.7:
@@ -1026,9 +1158,11 @@ class BotEngine:
     def _do_attack(self, frame, now, elapsed):
         npc, pickup = self._find_npc()
         if pickup is not None:
-            self.log(f"[PICKUP] 정령의 돌 발견! 줍기  pos={pickup}")
-            self._click_move(pickup)
-            time.sleep(1.0)
+            self.log(f"[PICKUP] {self._last_pickup_name} 발견! 줍기  pos={pickup}")
+            self._run_pickup_until_gone(pickup)
+            return   # 사라질 때까지 줍고 나서 공격 로직 진입 금지
+        else:
+            self._pickup_release()
         if npc is not None:
             self.npc_pos = npc
             self._last_npc_seen_t = now
@@ -1062,14 +1196,14 @@ class BotEngine:
     def _do_fighting(self, frame, now, elapsed):
         npc, pickup = self._find_npc()
 
-        # 정령의 돌 줍기
+        # 아이템 줍기
         if pickup is not None:
-            self.log(f"[PICKUP] 정령의 돌 발견! 공격 중단 → 줍기  pos={pickup}")
+            self.log(f"[PICKUP] {self._last_pickup_name} 발견! 공격 중단 → 줍기  pos={pickup}")
             key_up("ctrl")
             mouse_up("left")
+            self._pickup_lmb_held = False  # 공격 LMB 해제와 함께 상태 리셋
             time.sleep(0.3)
-            self._click_move(pickup)
-            time.sleep(2.0)
+            self._run_pickup_until_gone(pickup)
             if self.npc_pos is not None:
                 self.log("[PICKUP] 줍기 완료 → 엔트 재공격")
                 self._click_move(self.npc_pos)

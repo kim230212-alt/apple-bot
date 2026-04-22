@@ -14,7 +14,16 @@ import glob
 
 # ── 매칭 임계값 (0.0~1.0, 높을수록 엄격) ──
 NPC_THRESHOLD = 0.70
-PICKUP_THRESHOLD = 0.70
+PICKUP_THRESHOLD = 0.72   # 기본값 (템플릿별 오버라이드 없을 때)
+
+# 템플릿별 임계값 — "정령의 돌"은 글자가 단순해 타 아이템(화살/오크 템 등)과 교차 매칭이
+# 많아 더 엄격하게. 특이한 단어는 기본값(0.72)으로 관대하게.
+PICKUP_THRESHOLDS = {
+    "pickup_001.png": 0.85,   # 정령의 돌
+    "pickup_002.png": 0.85,   # 정령의 돌 (변형)
+    "pickup_003.png": 0.72,   # 버섯포자의 즙
+    "pickup_004.png": 0.72,   # 미스릴 원석
+}
 
 
 def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
@@ -99,6 +108,7 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
 
         candidates = []
         pickup_pos = None
+        pickup_name = None
         debug_results = []
 
         # ── NPC 템플릿 매칭 ──
@@ -132,13 +142,15 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
         # NMS: 중복 제거 (가까운 매칭 중 최고 점수만 유지)
         candidates = _nms(candidates, min_dist=40)
 
-        # ── 줍기 템플릿 매칭 ──
+        # ── 줍기 템플릿 매칭 — 모든 템플릿 중 최고 점수 선택 ──
+        best_score = -1.0
         for tmpl_gray, th, tw, name in pickup_templates:
             if game_gray.shape[0] < th or game_gray.shape[1] < tw:
                 continue
 
+            thresh = PICKUP_THRESHOLDS.get(name, PICKUP_THRESHOLD)
             result = cv2.matchTemplate(game_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
-            locs = np.where(result >= PICKUP_THRESHOLD)
+            locs = np.where(result >= thresh)
 
             for pt in zip(*locs[::-1]):
                 x1, y1 = int(pt[0]), int(pt[1])
@@ -148,10 +160,12 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
                      x1 + tw + sx1, y1 + th + sy1,
                      name, score)
                 )
-                if pickup_pos is None:
+                if score > best_score:
+                    best_score = score
                     cx = x1 + tw // 2 + sx1
                     cy = y1 + th // 2 + sy1
                     pickup_pos = (cx, cy)
+                    pickup_name = name
 
         # 가장 가까운 NPC 선택 (ocr_process와 동일 로직)
         npc_found = None
@@ -170,6 +184,8 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
         result_q.put({
             'npc': npc_found,
             'pickup': pickup_pos,
+            'pickup_name': pickup_name,
+            'pickup_score': best_score if pickup_pos is not None else 0.0,
             'debug_results': debug_results,
         })
 

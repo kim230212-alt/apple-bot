@@ -44,12 +44,27 @@ class BotConfig:
         self.weight_pos = (55, 866)
         self.weight_check_interval = 30.0
 
+        # HP 초록 감지 → F8 (물약)
+        self.hp_pos = (552, 768)
+        self.hp_check_interval = 10.0
+        self.hp_f8_cooldown = 3.0
+
         # 창고
         self.warehouse_scroll_click = (57, 122)
         self.warehouse_npc_click = (854, 342)
         self.warehouse_deposit_click = (92, 165)
         self.warehouse_ok_click = (288, 555)
         self.warehouse_item_threshold = 0.7
+
+        # 창고 맡길 아이템 (GUI 체크박스로 토글)
+        self.deposit_items = [
+            {"name": "엔트의 열매",     "enabled": True},
+            {"name": "엔트의 줄기",     "enabled": True},
+            {"name": "정령의 돌",       "enabled": True},
+            {"name": "버섯포자의 즙",   "enabled": True},
+            {"name": "미스릴 원석",     "enabled": True},
+            {"name": "엔트의 껍질",     "enabled": True},
+        ]
 
         # 혈맹 창고
         self.use_clan_warehouse = False
@@ -117,11 +132,13 @@ class BotConfig:
         "drag_dist", "atk_confirm_timeout", "reattack_fail_max",
         "escape_retry_max", "approach_fail_max", "close_enough",
         "scroll_key", "scroll_click", "scroll_wait",
-        "weight_pos", "player_pos", "chat_rect", "ocr_scan_rect",
+        "weight_pos", "hp_pos", "hp_check_interval", "hp_f8_cooldown",
+        "player_pos", "chat_rect", "ocr_scan_rect",
         "npc_name", "pickup_keyword", "pickup_conf",
         "warehouse_npc_click", "warehouse_deposit_click",
         "warehouse_ok_click", "warehouse_scroll_click",
         "warehouse_item_threshold",
+        "deposit_items",
         "use_clan_warehouse",
         "clan_warehouse_scroll_click", "clan_warehouse_npc_click",
         "clan_warehouse_deposit_click", "clan_warehouse_ok_click",

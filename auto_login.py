@@ -67,10 +67,11 @@ _OK_LOGIN_X   = 0.798   # ok 버튼 x (로그인 화면)
 _OK_LOGIN_Y   = 0.758   # ok 버튼 y
 
 # 캐릭터 슬롯 위치 비율 (캐릭터 선택 화면)
+# 1280x960 기준: 슬롯2=(661,~260), 슬롯3=(1000,~260) 탐지 결과 기반
 _CHAR_SLOTS = {
-    1: (0.30, 0.33),    # 1번째 캐릭터 (왼쪽)
-    2: (0.45, 0.33),    # 2번째 캐릭터 (중앙)
-    3: (0.60, 0.33),    # 3번째 캐릭터 (오른쪽)
+    1: (0.25, 0.28),    # 1번째 캐릭터 (왼쪽)
+    2: (0.52, 0.28),    # 2번째 캐릭터 (중앙)
+    3: (0.78, 0.28),    # 3번째 캐릭터 (오른쪽)
 }
 
 # DPI 인식
@@ -152,8 +153,10 @@ def screen_pos(hwnd, win_pos):
 
 
 # ─── 자동 접속 로직 ───────────────────────────────────
-def run_auto_login(cfg, log_fn):
-    """자동 접속 전체 흐름"""
+def run_auto_login(cfg, log_fn, init_devices=True):
+    """자동 접속 전체 흐름.
+    init_devices=False: 호출자(GUI 등)가 이미 interception 디바이스를 잡은 경우 재초기화 스킵
+    """
     from interception import (
         auto_capture_devices, set_devices,
         key_down, key_up, press,
@@ -212,6 +215,7 @@ def run_auto_login(cfg, log_fn):
     tmpl_ok    = cv2.imread(f"{TMPL_DIR}/ok_btn.png")
     tmpl_ok_login = cv2.imread(f"{TMPL_DIR}/ok_login_btn.png")
     tmpl_page2 = cv2.imread(f"{TMPL_DIR}/page2_btn.png")
+    tmpl_skip  = cv2.imread(f"{TMPL_DIR}/skip_btn.png")
 
     def tmpl_find(frame, tmpl):
         """프레임에서 템플릿을 찾아 중심 (cx, cy, 신뢰도) 반환. 없으면 None."""
@@ -225,36 +229,45 @@ def run_auto_login(cfg, log_fn):
             return (cx, cy, max_val)
         return None
 
-    def wait_and_click_tmpl(hwnd, tmpl, label, timeout=60):
-        """화면에서 템플릿이 나타날 때까지 대기 후 클릭"""
+    def wait_and_click_tmpl(hwnd, tmpl, label, timeout=60, poll=0.3, heartbeat=15):
+        """화면에서 템플릿이 나타날 때까지 대기 후 클릭. 발견 즉시 다음 단계로."""
         start = time.time()
+        last_log = start
         while time.time() - start < timeout:
             frame = grab_frame(hwnd)
-            if frame is None:
-                time.sleep(1)
-                continue
-            match = tmpl_find(frame, tmpl)
-            if match:
-                cx, cy, conf = match
-                log_fn(f"  [{label}] 발견 (신뢰도={conf:.3f}) → 클릭 ({cx},{cy})")
-                click_at(hwnd, (cx, cy))
-                return True
-            time.sleep(1.5)
+            if frame is not None:
+                match = tmpl_find(frame, tmpl)
+                if match:
+                    cx, cy, conf = match
+                    elapsed = time.time() - start
+                    log_fn(f"  [{label}] 발견 (신뢰도={conf:.3f}, {elapsed:.1f}s) → 클릭 ({cx},{cy})")
+                    click_at(hwnd, (cx, cy))
+                    return True
+            now = time.time()
+            if now - last_log >= heartbeat:
+                log_fn(f"  [{label}] 대기 중... ({int(now - start)}s/{timeout}s)")
+                last_log = now
+            time.sleep(poll)
         log_fn(f"  [{label}] 못 찾음 (타임아웃 {timeout}초)")
         return False
 
-    def wait_for_tmpl(hwnd, tmpl, label, timeout=60):
-        """화면에서 템플릿이 나타날 때까지 대기 (클릭 없음)"""
+    def wait_for_tmpl(hwnd, tmpl, label, timeout=60, poll=0.3, heartbeat=15):
+        """화면에서 템플릿이 나타날 때까지 대기 (클릭 없음). 발견 즉시 반환."""
         start = time.time()
+        last_log = start
         while time.time() - start < timeout:
             frame = grab_frame(hwnd)
-            if frame is None:
-                time.sleep(1)
-                continue
-            match = tmpl_find(frame, tmpl)
-            if match:
-                return match
-            time.sleep(1.5)
+            if frame is not None:
+                match = tmpl_find(frame, tmpl)
+                if match:
+                    elapsed = time.time() - start
+                    log_fn(f"  [{label}] 발견 ({elapsed:.1f}s)")
+                    return match
+            now = time.time()
+            if now - last_log >= heartbeat:
+                log_fn(f"  [{label}] 대기 중... ({int(now - start)}s/{timeout}s)")
+                last_log = now
+            time.sleep(poll)
         return None
 
     def get_client_size(hwnd):
@@ -293,10 +306,13 @@ def run_auto_login(cfg, log_fn):
     w, h = get_client_size(hwnd)
     log_fn(f"  클라이언트 영역: {w}x{h}")
 
-    # 디바이스 초기화
-    log_fn("  디바이스 초기화...")
-    auto_capture_devices(keyboard=True, mouse=True, verbose=True)
-    set_devices(keyboard=0)
+    # 디바이스 초기화 (외부에서 이미 잡은 경우 스킵)
+    if init_devices:
+        log_fn("  디바이스 초기화 (마우스 움직여주세요)...")
+        auto_capture_devices(keyboard=True, mouse=True, verbose=True)
+        set_devices(keyboard=0)
+    else:
+        log_fn("  디바이스 초기화 스킵 (기존 설정 사용)")
 
     # 템플릿 확인
     if tmpl_agree is None or tmpl_ok is None:
@@ -333,31 +349,38 @@ def run_auto_login(cfg, log_fn):
         log_fn("동의서 화면이 나타나지 않았습니다 (120초 타임아웃). 종료.")
         return False
 
-    # 단계 B: 클릭 → 사라질 때까지 재시도
+    # 단계 B: 클릭 → 사라질 때까지 재시도 (빠른 폴링)
+    def tmpl_gone(tmpl, timeout=5, poll=0.3):
+        """템플릿이 사라질 때까지 대기. 사라지면 True."""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            f = grab_frame(hwnd)
+            if f is not None and not tmpl_find(f, tmpl):
+                return True
+            time.sleep(poll)
+        return False
+
     for attempt in range(5):
         log_fn(f"  클릭 시도 {attempt+1}/5")
         click_at(hwnd, found_pos)
-        time.sleep(3)
-
-        # 버튼이 사라졌는지 확인
-        after = grab_frame(hwnd)
-        if after is not None:
-            check = tmpl_find(after, tmpl_agree)
-            if not check:
-                log_fn("  동의서 클릭 성공!")
-                break
+        if tmpl_gone(tmpl_agree, timeout=5):
+            log_fn("  동의서 클릭 성공!")
+            break
         log_fn(f"  아직 동의서 화면 → 재시도")
     else:
         log_fn("동의서 클릭 5회 실패. 종료.")
         return False
-    time.sleep(2)
 
-    # 4. 서버 리스트 — 고정 좌표 사용
+    # 4. 서버 리스트 — 페이지 버튼(tmpl_page2)이 나타날 때까지 대기
     server = cfg["server"]
     log_fn(f"[4/6] 서버 선택: {server}")
 
-    # 서버 리스트 화면 대기 (3초 추가 대기)
-    time.sleep(3)
+    # 서버 리스트 화면이 완전히 뜰 때까지 대기 (페이지 버튼으로 감지)
+    if tmpl_page2 is not None:
+        if wait_for_tmpl(hwnd, tmpl_page2, "서버 리스트", timeout=60) is None:
+            log_fn("  서버 리스트 화면 감지 실패 → 진행 시도")
+    else:
+        time.sleep(3)
 
     # 디버그: 서버 리스트 화면 저장
     srv_frame = grab_frame(hwnd)
@@ -369,37 +392,57 @@ def run_auto_login(cfg, log_fn):
         log_fn(f"  서버 '{server}'가 목록에 없습니다.")
         return False
 
-    # 서버가 2페이지면 페이지 전환 (템플릿 매칭)
+    # 서버가 2페이지면 페이지 전환 (템플릿 매칭 → 화면 변경 확인)
     if page == 2:
         log_fn("  2페이지로 이동...")
+        before_p2 = grab_frame(hwnd)
         if not wait_and_click_tmpl(hwnd, tmpl_page2, "2페이지 버튼", timeout=10):
             log_fn("  2페이지 버튼 못 찾음 → 고정 좌표 시도")
             p2_pos = ratio_pos(hwnd, _PAGE2_X, _PAGE2_Y)
             click_at(hwnd, p2_pos)
-        time.sleep(2)
-        # 2페이지 화면 저장
+        # 화면 변경 확인 (페이지 전환 감지)
+        if before_p2 is not None:
+            wait_screen_change(hwnd, before_p2, timeout=5)
         srv_frame2 = grab_frame(hwnd)
         if srv_frame2 is not None:
             save_debug(srv_frame2, "server_list_p2")
 
     log_fn(f"  서버 '{server}' 좌표: ({srv_pos[0]},{srv_pos[1]})")
     click_at(hwnd, srv_pos)
-    time.sleep(1)
 
-    # 서버 클릭 후 화면 확인
     after_srv = grab_frame(hwnd)
     if after_srv is not None:
         save_debug(after_srv, "after_server_click")
     log_fn("  서버 선택 완료")
-    time.sleep(3)
 
-    # 5. Account / Password
-    log_fn("[5/6] 로그인 화면...")
+    # 4.5. 업데이트 공지 (주 1회 정도만 등장) — skip 버튼 있으면 클릭
+    log_fn("[4.5/6] 업데이트 공지 확인 (8초 대기)...")
+    if tmpl_skip is not None:
+        skip_start = time.time()
+        skip_clicked = False
+        while time.time() - skip_start < 8:
+            frame = grab_frame(hwnd)
+            if frame is not None:
+                match = tmpl_find(frame, tmpl_skip)
+                if match:
+                    cx, cy, conf = match
+                    log_fn(f"  skip 발견 (신뢰도={conf:.3f}) → 클릭 ({cx},{cy})")
+                    click_at(hwnd, (cx, cy))
+                    skip_clicked = True
+                    time.sleep(2)
+                    break
+            time.sleep(0.3)
+        if not skip_clicked:
+            log_fn("  공지 없음 → 통과")
+    else:
+        log_fn("  skip 템플릿 없음 → 스킵")
 
-    # Account 화면이 뜰 때까지 대기 (ok 버튼 템플릿으로 감지)
+    # 5. Account / Password — 로그인 화면 대기 (대기열 대응: 긴 타임아웃)
+    log_fn("[5/6] 로그인 화면 대기 (대기열이면 오래 걸릴 수 있음)...")
     login_ok_tmpl = tmpl_ok_login if tmpl_ok_login is not None else tmpl_ok
-    wait_for_tmpl(hwnd, login_ok_tmpl, "ok(로그인)", timeout=30)
-    time.sleep(1)
+    if wait_for_tmpl(hwnd, login_ok_tmpl, "ok(로그인)", timeout=600, heartbeat=30) is None:
+        log_fn("  로그인 화면이 나타나지 않음 (10분 타임아웃). 종료.")
+        return False
 
     # 계정/비번이 설정되어 있으면 입력, 아니면 기존 저장값 사용
     if cfg.get("account") and cfg.get("password"):
@@ -424,19 +467,23 @@ def run_auto_login(cfg, log_fn):
     else:
         log_fn("  계정/비번 저장됨 → 바로 ok")
 
-    # ok 클릭
+    # ok 클릭 → 캐릭터 선택 화면 전환 대기 (화면 변경 감지)
     ok_pos = ratio_pos(hwnd, _OK_LOGIN_X, _OK_LOGIN_Y)
     log_fn(f"  ok 클릭 ({ok_pos[0]},{ok_pos[1]})")
+    before_login_click = grab_frame(hwnd)
     click_at(hwnd, ok_pos)
-    log_fn("  로그인 완료")
-    time.sleep(5)
+
+    # 화면이 바뀔 때까지 대기 (캐릭터 선택 로드 확인)
+    if before_login_click is not None:
+        log_fn("  캐릭터 선택 화면 전환 대기...")
+        wait_screen_change(hwnd, before_login_click, timeout=30)
 
     # 6. 캐릭터 선택 — 슬롯 직접 클릭 → ok
     char_slot = cfg.get("character", 1)
     log_fn(f"[6/6] 캐릭터 {char_slot}번째 선택...")
 
-    # 캐릭터 화면 대기
-    time.sleep(3)
+    # 캐릭터 화면 로딩 안정화
+    time.sleep(1.5)
 
     # 디버그: 캐릭터 선택 화면 저장
     char_frame = grab_frame(hwnd)
@@ -448,13 +495,12 @@ def run_auto_login(cfg, log_fn):
     char_pos = ratio_pos(hwnd, slot_ratio[0], slot_ratio[1])
     log_fn(f"  캐릭터 {char_slot}번 슬롯 클릭 ({char_pos[0]},{char_pos[1]})")
     click_at(hwnd, char_pos)
-    time.sleep(2)
 
-    # ok 클릭 (템플릿 매칭)
-    if not wait_and_click_tmpl(hwnd, tmpl_ok, "ok(캐릭터)", timeout=15):
+    # ok 클릭 (템플릿이 나타날 때까지 대기 후 클릭)
+    if not wait_and_click_tmpl(hwnd, tmpl_ok, "ok(캐릭터)", timeout=20):
+        log_fn("  ok 버튼 못 찾음 → Enter 키 대체")
         press("return")
     log_fn("  캐릭터 선택 완료")
-    time.sleep(3)
 
     log_fn("=== 접속 완료! ===")
     return True
