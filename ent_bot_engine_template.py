@@ -1064,8 +1064,7 @@ class BotEngine:
             sx, sy = self._wincap.get_screen_position((rx, ry))
 
         self.npc_pos = None
-        self.log("[DEAD] 부활 완료 → 창고 루틴")
-        self._run_warehouse()
+        self.log("[DEAD] 부활 완료 → 패트롤 시작")
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
@@ -1094,7 +1093,6 @@ class BotEngine:
         time.sleep(5.0)
         self._type_location_cmd()
         self.npc_pos = None
-        self._run_warehouse()
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
