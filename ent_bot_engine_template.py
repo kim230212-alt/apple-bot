@@ -889,7 +889,7 @@ class BotEngine:
                 return
             self.log(f"[F11] 순간이동 시도 ({retry+1}/{max_retry})")
             self._ikey_force("f11")
-            self._interruptible_sleep(3)
+            self._interruptible_sleep(2)
             if not self._running:
                 return
             frame = self._wincap.get_screenshot()
