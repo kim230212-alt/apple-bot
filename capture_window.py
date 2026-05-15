@@ -6,7 +6,13 @@ import win32con
 import ctypes
 import time
 import os
+import threading
 import dxcam
+
+# dxcam은 output_idx별로 카메라 인스턴스를 공유함.
+# 여러 스레드가 동시에 같은 카메라를 grab()하면 DXGI_ERROR_INVALID_CALL 발생.
+# output_idx별 Lock으로 직렬화.
+_dxcam_locks: dict[int, threading.Lock] = {}
 
 # DPI 인식 설정 (물리 픽셀 기준으로 좌표 일치)
 try:
@@ -23,13 +29,13 @@ class WindowCapture:
     offset_x = 0
     offset_y = 0
 
-    def __init__(self, window_name=None):
+    def __init__(self, window_name=None, window_index: int = 0):
         self.dpi_scale = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100
 
         if window_name is None:
             self.hwnd = win32gui.GetDesktopWindow()
         else:
-            self.hwnd = self.find_window_by_substring(window_name)
+            self.hwnd = self.find_window_by_substring(window_name, index=window_index)
             if not self.hwnd:
                 raise Exception(f"'{window_name}' 글자가 포함된 창을 찾을 수 없습니다. 게임이 켜져 있는지 확인해주세요.")
 
@@ -57,22 +63,29 @@ class WindowCapture:
         self._update_capture_region()
         print(f"  dxcam monitor={self._cur_output}  crop={self._crop}")
 
-    def find_window_by_substring(self, substring):
-        """창 제목에 특정 문자열(substring)이 포함된 창의 핸들(hwnd)을 찾습니다."""
-        found_hwnd = None
-        def callback(hwnd, extra):
-            nonlocal found_hwnd
-            if win32gui.IsWindowVisible(hwnd):
-                title = win32gui.GetWindowText(hwnd)
-                if substring in title:
-                    found_hwnd = hwnd
-                    return False  # 찾았으면 EnumWindows 중지 (False를 리턴하면 중지되지만 에러가 발생할 수 있음, 여기서는 멈춤)
+    def find_window_by_substring(self, substring, index: int = 0):
+        """창 제목에 substring이 포함된 창을 화면 X좌표 기준으로 정렬 후 index번째 반환.
+        index=0: 왼쪽 창, index=1: 오른쪽 창."""
+        found = []
+        def callback(hwnd, _):
+            if win32gui.IsWindowVisible(hwnd) and substring in win32gui.GetWindowText(hwnd):
+                try:
+                    rect = win32gui.GetWindowRect(hwnd)
+                    found.append((rect[0], hwnd))
+                except Exception:
+                    pass
             return True
         try:
             win32gui.EnumWindows(callback, None)
         except Exception:
-            pass # EnumWindows 콜백에서 False를 반환하면 발생하는 예외 무시
-        return found_hwnd
+            pass
+        found.sort()
+        hwnds = [h for _, h in found]
+        if not hwnds:
+            return None
+        hwnd = hwnds[index] if index < len(hwnds) else hwnds[0]
+        print(f"[WindowCapture] 창 선택 index={index}/{len(hwnds)}  hwnd={hwnd}  title={win32gui.GetWindowText(hwnd)}")
+        return hwnd
 
     def _update_capture_region(self):
         """창 위치/모니터를 재확인하고 캡처 좌표 갱신"""
@@ -115,7 +128,7 @@ class WindowCapture:
 
             # dxcam output 탐색: 논리 해상도와 일치하는 것 → scale=1.0 (FHD 100%)
             # 또는 논리*primary_scale과 일치하는 것 → scale=primary (4K 150%)
-            dx_idx = 0
+            dx_idx = None
             mon_scale = 1.0
             for i in range(8):
                 try:
@@ -124,22 +137,20 @@ class WindowCapture:
                     cam = self._cameras[i]
                     print(f"    dxcam[{i}]: {cam.width}x{cam.height}  logical={mon_lw}x{mon_lh}")
                     if cam.width == mon_lw and cam.height == mon_lh:
-                        # 100% DPI 모니터 (물리 = 논리)
                         dx_idx    = i
                         mon_scale = 1.0
                         break
                     elif cam.width == int(mon_lw * self.dpi_scale) and \
                          cam.height == int(mon_lh * self.dpi_scale):
-                        # primary DPI 스케일과 일치
                         dx_idx    = i
                         mon_scale = self.dpi_scale
                         break
                 except Exception:
-                    break
+                    continue  # 이 output 실패 → 다음 시도
 
-            self._cur_output  = dx_idx
+            self._cur_output  = dx_idx   # None이면 BitBlt 폴백 사용
             self._mon_scale   = mon_scale
-            print(f"  monitor={dx_idx}  scale={mon_scale:.2f}  logical={mon_lw}x{mon_lh}")
+            print(f"  monitor={dx_idx}  scale={mon_scale:.2f}  logical={mon_lw}x{mon_lh}  {'(BitBlt폴백)' if dx_idx is None else ''}")
 
         # 크롭 좌표: 해당 모니터 스케일 기준 물리 픽셀
         s  = self._mon_scale
@@ -156,17 +167,21 @@ class WindowCapture:
         pt = win32gui.ClientToScreen(self.hwnd, (0, 0))
         if pt != (self.offset_x, self.offset_y):
             self._update_capture_region()  # 창 이동 시에만 갱신
-        camera = self._cameras[self._cur_output]
 
-        # 전체 화면 캡처 후 게임 창 영역 직접 슬라이싱
-        full = camera.grab()
-        if full is not None:
-            l, t, r, b = self._crop
-            frame = full[t:b, l:r]
-            if frame.shape[1] != self.w or frame.shape[0] != self.h:
-                frame = cv2.resize(frame, (self.w, self.h))
-            return frame
-        # fallback: BitBlt
+        # dxcam 캡처 (초기화 성공한 경우만)
+        if self._cur_output is not None and self._cur_output in self._cameras:
+            camera = self._cameras[self._cur_output]
+            # 같은 output_idx 카메라를 여러 스레드가 동시에 grab()하면 DXGI 오류 → Lock 직렬화
+            if self._cur_output not in _dxcam_locks:
+                _dxcam_locks[self._cur_output] = threading.Lock()
+            with _dxcam_locks[self._cur_output]:
+                full = camera.grab()
+            if full is not None:
+                l, t, r, b = self._crop
+                frame = full[t:b, l:r]
+                if frame.shape[1] != self.w or frame.shape[0] != self.h:
+                    frame = cv2.resize(frame, (self.w, self.h))
+                return frame
 
         # fallback: BitBlt
         wDC = win32gui.GetWindowDC(self.hwnd)

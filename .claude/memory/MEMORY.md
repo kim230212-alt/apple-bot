@@ -1,0 +1,5 @@
+- [Template sync](feedback_template_sync.md) — engine/gui 수정 시 _template 파일만 수정
+- [Window offset](project_window_offset.md) — 창 오프셋 (27,63), pyautogui 좌표 변환 시 빼야 함
+- [Coord picker](feedback_coord_picker.md) — 좌표 찍을 때 반드시 coord_picker.py로 Lineage Classic 창 인식 후 게임 창 기준 좌표 사용
+- [멀티 인스턴스](project_multi_instance.md) — 2번 인스턴스 파일/수정 내역, 실행법, 미완료 항목
+- [shop_bot 작업](project_shop_bot.md) — C:\shop 수정 내역: NPC감지/마우스커서/창고자동보충/모니터주기

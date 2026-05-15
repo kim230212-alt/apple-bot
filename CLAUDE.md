@@ -26,8 +26,10 @@ numpy, opencv-python, pywin32, keyboard, easyocr, dxcam, interception-python, Pi
 
 ## 실행 방법
 ```
-python ent_bot_gui.py          # CUDA 버전
-python ent_bot_gui_template.py # 템플릿 버전
+python ent_bot_gui.py          # CUDA 버전 (단일)
+python ent_bot_gui_template.py # 템플릿 버전 (단일)
+python ent_bot_gui_dual.py     # 듀얼 버전 (두 창 동시, 단일 프로세스)
+run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 ```
 
 ## 설정
@@ -82,6 +84,43 @@ python ent_bot_gui_template.py # 템플릿 버전
   - 초기 좌표 고정 (`pos` 갱신 안 함), 비교도 `initial_pos` 기준 → 다중 아이템 상황에서 왔다갔다 제거
   - `stick_radius=60px`, `miss_confirm=4`, `max_duration=15s`, 로그에 클릭 횟수 표시
 - **픽업 1순위 보장**: `_do_approach`에도 픽업 체크 추가 (엔트로 접근 중에도 아이템 보이면 중단하고 줍기)
+
+### 2026-05-15 작업 — 듀얼 봇 (단일 프로세스)
+
+#### 신규 파일
+- **`ent_bot_gui_dual.py`**: 단일 프로세스에서 두 봇 동시 실행 GUI
+  - `BotPanel(ttk.LabelFrame)`: 봇 1개 제어 패널 (시작/정지/일시정지, 로그, 혈맹창고/랜덤순찰 체크박스, 자동접속 버튼)
+  - `DualBotGUI`: 두 패널 좌우 배치, 860×700 창
+  - Bot 1: `ent_config.json`, `init_delay=0.0` / Bot 2: `ent_config2.json`, `init_delay=3.0` (auto_capture 경쟁 방지)
+  - F12 전체 긴급종료 핫키
+- **`run_dual.bat`**: UAC 관리자 권한 자동 상승 후 `ent_bot_gui_dual.py` 실행
+- **`ent_config2.json`**: Bot 2 설정 파일 (`window_index=1`, `keyboard_device=0`, `mouse_device=13`)
+
+#### `ent_bot_engine_template.py` 수정 (듀얼 지원)
+- **Windows 포그라운드 잠금 비활성화**: `initialize()`에서 `SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0)` 호출
+- **디바이스 캐시**: `keyboard_device` + `mouse_device` 둘 다 JSON에 있으면 `auto_capture_devices` 생략 (두 봇 동시 시작 시 경쟁 방지)
+- **`_ensure_focus()`**: `AttachThreadInput + SetForegroundWindow` + 30ms×3회 재시도, `GetForegroundWindow()` 검증
+- **`_main_loop` 예외 래퍼**: 봇 스레드 예외 시 traceback 로그 후 정지 (무음 죽음 방지)
+
+#### `capture_window.py` 수정
+- **dxcam 스레드 안전**: 모듈 레벨 `_dxcam_locks: dict[int, threading.Lock]`
+  - 같은 `output_idx` 카메라를 두 스레드가 동시에 `grab()` 하면 `DXGI_ERROR_INVALID_CALL` 발생 → output별 Lock으로 직렬화
+
+#### 포커스 리스 시스템 (`ent_bot_engine_template.py`)
+- **배경**: Bot 2 스크롤이 Bot 1 창고 작업 중인 창에 들어가는 문제 (포커스 레이스 컨디션)
+- **`_focus_lease_hwnd`**: 모듈 레벨 전역 변수 (0=독점 없음, 비-0=해당 hwnd 독점 중)
+- **`_acquire_focus_lease()`**: 창고 등 장기 작업 시작 시 호출 → 타 엔진 포커스 전환 차단
+- **`_release_focus_lease()`**: 작업 완료 또는 `stop()` 시 해제
+- **`_run_warehouse()`**: `_acquire_focus_lease()` / `finally: _release_focus_lease()` 래핑
+- **`_wait_for_lease(timeout=120s)`**: 다른 엔진이 리스 보유 중이면 락 밖에서 최대 120초 대기 후 진행. `_ikey`, `_ipress`, `_iscroll`, `_click_move` 모두 락 획득 전에 호출
+  - 대기 시작 시 `"[대기] 다른 봇 창고 작업 중 — 포커스 리스 해제 대기"` 로그
+
+#### `_scroll_return` 수정
+- **`_ikey_force(key, max_wait=5s)`**: 포커스 확립 실패 시 0.3초 간격으로 최대 5초 재시도. F9/F11 등 반드시 눌려야 하는 키 전용 (기존 `_ikey`는 90ms 후 조용히 실패)
+- **F9, F5, F11** → `_ikey_force` 사용
+- **최대 재시도 5회** 추가 → 무한루프 방지, 초과 시 현재 위치에서 패트롤 시작
+- **F11 후 대기 1초 → 3초** (텔레포트 로딩 시간 확보)
+- **zone 임계값 0.821 → 0.70** (실제 score 0.51~0.59 측정됨, 조정 필요 시 `_is_in_zone` 참고)
 
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)

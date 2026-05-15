@@ -17,8 +17,26 @@ import glob
 import cv2
 import numpy as np
 
+import ctypes
 import win32gui
 from typing import Optional, Tuple, Callable
+
+
+def _force_foreground(hwnd: int) -> None:
+    """Windows foreground lock 우회: AttachThreadInput + SetForegroundWindow.
+    일반 SetForegroundWindow는 백그라운드 프로세스에서 무시됨."""
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    cur_thread = kernel32.GetCurrentThreadId()
+    fg_hwnd = user32.GetForegroundWindow()
+    if fg_hwnd:
+        fg_thread = user32.GetWindowThreadProcessId(fg_hwnd, None)
+        if fg_thread and fg_thread != cur_thread:
+            user32.AttachThreadInput(fg_thread, cur_thread, True)
+            user32.SetForegroundWindow(hwnd)
+            user32.AttachThreadInput(fg_thread, cur_thread, False)
+            return
+    user32.SetForegroundWindow(hwnd)
 
 from template_scanner import template_process_fn
 
@@ -27,7 +45,10 @@ from capture_window import WindowCapture
 from interception import (
     move_to, mouse_down, mouse_up, auto_capture_devices,
     click, press, key_down, key_up, set_devices, scroll,
+    get_keyboard, get_mouse,
 )
+from interception.inputs import _g_context as _icp_ctx
+from input_lock import input_lock as _ilock
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -37,6 +58,10 @@ DIRECTIONS = [
     (-1, 0), (-1, -1), (0, -1), (1, -1),
 ]
 DIR_NAMES = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"]
+
+# 창고 등 장기 연속 동작 중 타 엔진의 포커스 탈취 방지.
+# 0이면 독점 없음, 비-0이면 해당 hwnd가 포커스 독점 중.
+_focus_lease_hwnd: int = 0
 
 
 class BotEngine:
@@ -66,6 +91,7 @@ class BotEngine:
         self._last_hp_check_t = 0.0
         self._last_hp_f8_t = 0.0
         self._last_stuck_check_t = 0.0
+        self._last_zone_check_t = 0.0
         self._last_atk_msg_t = 0.0
         self._last_atk_msg_y = None
         self._atk_fail_count = 0
@@ -99,6 +125,8 @@ class BotEngine:
         self._wincap: Optional[WindowCapture] = None
         self._close_tmpl = None
         self._restart_tmpl = None
+        self._zone_tmpl = None
+        self._pan_mane_tmpl = None
         self._fruit_tmpl = None
         self._stem_tmpl = None
         self._spirit_tmpl = None
@@ -113,17 +141,98 @@ class BotEngine:
     # 초기화
     # ──────────────────────────────────────────
     def initialize(self):
-        self.log("디바이스 감지 중... (마우스 움직여주세요)")
-        auto_capture_devices(keyboard=True, mouse=True, verbose=True)
+        # Windows Foreground Lock Timeout 비활성화 (SetForegroundWindow 거부 방지)
+        try:
+            import ctypes as _ctypes
+            _ctypes.windll.user32.SystemParametersInfoW(0x2001, 0, 0, 0)
+            self.log("포그라운드 잠금 타임아웃 비활성화 완료")
+        except Exception:
+            pass
 
         kb = self.cfg.keyboard_device
         ms = self.cfg.mouse_device
-        if kb is not None or ms is not None:
+        if kb is not None and ms is not None:
+            # 양쪽 device 설정됨 → auto_capture 생략 (멀티 인스턴스 경쟁 방지)
             set_devices(keyboard=kb, mouse=ms)
-            self.log(f"디바이스 오버라이드  KB={kb}  Mouse={ms}")
+            self.log(f"디바이스 설정 (캐시)  KB={kb}  Mouse={ms}")
+        else:
+            self.log("디바이스 감지 중... (마우스 움직여주세요)")
+            auto_capture_devices(keyboard=True, mouse=True, verbose=True)
+            kb = self.cfg.keyboard_device
+            ms = self.cfg.mouse_device
+            if kb is not None or ms is not None:
+                set_devices(keyboard=kb, mouse=ms)
+                self.log(f"디바이스 오버라이드  KB={kb}  Mouse={ms}")
+                # 마우스 device 미설정 시 감지된 값 저장 → 다음 실행부터 auto_capture 생략
+                if ms is None:
+                    detected_ms = get_mouse()
+                    if detected_ms is not None:
+                        self.cfg.mouse_device = detected_ms
+                        if self.cfg._path:
+                            self.cfg.save()
+                        self.log(f"[MS] 마우스 디바이스 저장: {detected_ms}")
+            else:
+                # auto_capture 결과 검증: 마우스와 같은 장치를 키보드로 잡은 경우 교정
+                detected_kb = get_keyboard()
+                detected_ms = get_mouse()
+                ms_hwid = (_icp_ctx.devices[detected_ms].get_HWID() or "")[:30] if detected_ms is not None else ""
+                kb_hwid = (_icp_ctx.devices[detected_kb].get_HWID() or "")[:30] if detected_kb is not None else ""
+                if ms_hwid and kb_hwid.startswith(ms_hwid[:20]):
+                    self.log(f"[KB] 키보드({detected_kb})가 마우스({detected_ms})와 동일 장치 → 교정 시도")
+                    for i in range(20):
+                        dev = _icp_ctx.devices[i]
+                        hwid = (dev.get_HWID() or "")
+                        if hwid and not hwid[:20].startswith(ms_hwid[:20]) and dev.handle not in (-1, 0, None):
+                            set_devices(keyboard=i)
+                            self.log(f"[KB] 키보드 교정 완료: {detected_kb} → {i}  ({hwid[:50]})")
+                            self.cfg.keyboard_device = i
+                            if self.cfg._path:
+                                self.cfg.save()
+                            break
+                else:
+                    self.log(f"[KB] 키보드 디바이스: {detected_kb}")
+                    # 마우스와 같은 수신기(같은 VID/PID)의 실제 키보드 인터페이스(MI_01) 찾기
+                    # 예: 로지텍 유니파이잉 수신기 MI_00=마우스, MI_01=키보드
+                    # auto_capture가 마우스 매크로 장치(UP:0001_U:0006)를 키보드로 잘못 잡는 경우 교정
+                    import re as _re
+                    m = _re.search(r'VID_[0-9A-Fa-f]+&PID_[0-9A-Fa-f]+',
+                                   (_icp_ctx.devices[detected_ms].get_HWID() or "") if detected_ms is not None else "")
+                    if m:
+                        vid_pid = m.group()
+                        for i in range(10):  # 키보드 슬롯 0-9
+                            try:
+                                h = (_icp_ctx.devices[i].get_HWID() or "")
+                                if (vid_pid in h and "MI_01" in h
+                                        and _icp_ctx.devices[i].handle not in (-1, 0, None)):
+                                    if i != detected_kb:
+                                        set_devices(keyboard=i)
+                                        self.log(f"[KB] 수신기 키보드로 교정: {detected_kb}→{i}  {vid_pid} MI_01")
+                                        self.cfg.keyboard_device = i
+                                        if self.cfg._path:
+                                            self.cfg.save()
+                                    break
+                            except Exception:
+                                pass
+                # 감지된 마우스 device 저장 (다음 실행 시 auto_capture 생략 가능)
+                if detected_ms is not None and self.cfg.mouse_device is None:
+                    self.cfg.mouse_device = detected_ms
+                    if self.cfg._path:
+                        self.cfg.save()
+                    self.log(f"[MS] 마우스 디바이스 저장: {detected_ms}")
 
-        self._wincap = WindowCapture(self.cfg.window_title)
+        idx = getattr(self.cfg, "window_index", 0)
+        self._wincap = WindowCapture(self.cfg.window_title, window_index=idx)
         self.log(f"창 감지 완료  ({self._wincap.offset_x}, {self._wincap.offset_y})")
+
+        # 게임 창 포커스 + 마우스 중앙으로 이동
+        try:
+            _force_foreground(self._wincap.hwnd)
+        except Exception:
+            pass
+        cx = self._wincap.offset_x + self._wincap.w // 2
+        cy = self._wincap.offset_y + self._wincap.h // 2
+        move_to(cx, cy)
+        self.log(f"게임 창 포커스 + 마우스 이동  ({cx}, {cy})")
 
         # 템플릿 확인
         tmpl_dir = os.path.join(BASE_DIR, "templates")
@@ -165,6 +274,8 @@ class BotEngine:
 
         self._close_tmpl = _load("close_btn.png")
         self._restart_tmpl = _load("restart_btn.png")
+        self._zone_tmpl = _load("zone_fairy_forest.png", required=False)
+        self._pan_mane_tmpl = _load("ent_pan_mane.png", required=False)
         self._fruit_tmpl = _load("ent_fruit.png")
         self._stem_tmpl = _load("ent_stem.png")
         self._spirit_tmpl = _load("ent_spirit.png")
@@ -190,6 +301,7 @@ class BotEngine:
 
     def stop(self):
         self._running = False
+        self._release_focus_lease()
 
     def pause(self):
         self._paused = True
@@ -198,6 +310,13 @@ class BotEngine:
     def resume(self):
         self._paused = False
         self.log("재개")
+
+    def _interruptible_sleep(self, secs: float):
+        end = time.time() + secs
+        while self._running and time.time() < end:
+            if self._paused:
+                end += 0.1
+            time.sleep(0.1)
 
     @property
     def is_running(self):
@@ -249,27 +368,118 @@ class BotEngine:
     def _click_move(self, win_pos):
         self._pickup_release()  # 줍기 LMB 유지 중이면 안전 해제
         sx, sy = self._wincap.get_screen_position(win_pos)
-        move_to(sx, sy)
-        time.sleep(0.05)
-        mouse_down("left")
-        time.sleep(0.03)
-        mouse_up("left")
+        self._wait_for_lease()
+        with _ilock():
+            self._ensure_focus()
+            move_to(sx, sy)
+            time.sleep(0.05)
+            mouse_down("left")
+            time.sleep(0.03)
+            mouse_up("left")
 
     def _pickup_click_hold(self, win_pos):
         """정령의 돌 줍기 — LMB 유지 + 커서만 이동.
         연속 줍기 시 캐릭터가 멈추지 않고 돌 사이를 부드럽게 이동."""
         sx, sy = self._wincap.get_screen_position(win_pos)
-        move_to(sx, sy)
-        if not self._pickup_lmb_held:
-            time.sleep(0.05)
-            mouse_down("left")
-            self._pickup_lmb_held = True
+        with _ilock():
+            self._ensure_focus()
+            move_to(sx, sy)
+            if not self._pickup_lmb_held:
+                time.sleep(0.05)
+                mouse_down("left")
+                self._pickup_lmb_held = True
 
     def _pickup_release(self):
         """_pickup_click_hold 로 눌러진 LMB 해제."""
         if self._pickup_lmb_held:
             mouse_up("left")
             self._pickup_lmb_held = False
+
+    def _acquire_focus_lease(self):
+        """창고 등 장기 연속 동작 시작 — 타 엔진이 포커스를 빼앗지 못하게 독점."""
+        global _focus_lease_hwnd
+        _focus_lease_hwnd = self._wincap.hwnd
+
+    def _release_focus_lease(self):
+        """포커스 독점 해제 (장기 동작 완료 또는 엔진 정지 시)."""
+        global _focus_lease_hwnd
+        try:
+            if _focus_lease_hwnd == self._wincap.hwnd:
+                _focus_lease_hwnd = 0
+        except AttributeError:
+            _focus_lease_hwnd = 0
+
+    def _wait_for_lease(self, timeout: float = 120.0):
+        """다른 엔진이 포커스 리스를 보유 중이면 리스가 풀릴 때까지 대기.
+        락 밖에서 호출해야 함 (락 안에서 대기하면 교착 발생)."""
+        deadline = time.time() + timeout
+        logged = False
+        while self._running and time.time() < deadline:
+            if _focus_lease_hwnd == 0 or _focus_lease_hwnd == self._wincap.hwnd:
+                return
+            if not logged:
+                self.log("[대기] 다른 봇 창고 작업 중 — 포커스 리스 해제 대기")
+                logged = True
+            time.sleep(0.5)
+
+    def _ensure_focus(self) -> bool:
+        """포커스 전환 확인 (최대 3회 재시도, 30ms 간격).
+        _wait_for_lease() 호출 후 진입 가정 — 리스 체크는 보조용."""
+        global _focus_lease_hwnd
+        if _focus_lease_hwnd != 0 and _focus_lease_hwnd != self._wincap.hwnd:
+            return False  # 리스 대기 없이 진입한 경우 방어
+        hwnd = self._wincap.hwnd
+        for _ in range(3):
+            try:
+                _force_foreground(hwnd)
+            except Exception:
+                pass
+            time.sleep(0.03)
+            if win32gui.GetForegroundWindow() == hwnd:
+                return True
+        self.log(f"[경고] 포커스 전환 실패 hwnd={hwnd}")
+        return False
+
+    # ── 직렬화 입력 헬퍼 (두 봇 동시 실행 시 Named Mutex로 충돌 방지) ──
+    def _ikey(self, key, delay=0.1):
+        """Lock + focus 확인 + key_down + sleep + key_up"""
+        self._wait_for_lease()
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            key_down(key)
+            time.sleep(delay)
+            key_up(key)
+
+    def _ipress(self, key):
+        """Lock + focus 확인 + press"""
+        self._wait_for_lease()
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            press(key)
+
+    def _iscroll(self, direction):
+        """Lock + focus 확인 + scroll"""
+        self._wait_for_lease()
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            scroll(direction)
+
+    def _ikey_force(self, key: str, max_wait: float = 5.0, delay: float = 0.1):
+        """포커스 확립 실패 시 최대 max_wait초 재시도 후 키 입력.
+        F9/F11 등 복귀 루틴처럼 반드시 눌려야 하는 키 전용."""
+        deadline = time.time() + max_wait
+        while self._running and time.time() < deadline:
+            with _ilock():
+                if self._ensure_focus():
+                    key_down(key)
+                    time.sleep(delay)
+                    key_up(key)
+                    return
+            time.sleep(0.3)
+        self.log(f"[경고] {key} 입력 실패 — 포커스 미확립 (max_wait={max_wait:.0f}s)")
 
     def _run_pickup_until_gone(self, initial_pos, max_duration=15.0,
                                miss_confirm=4, stick_radius=100,
@@ -295,15 +505,19 @@ class BotEngine:
         ix, iy = initial_pos
         sx, sy = self._wincap.get_screen_position(initial_pos)
         while self._running and time.time() - t0 < max_duration:
-            move_to(sx, sy)
-            time.sleep(0.04)
-            mouse_down("left")
-            time.sleep(0.03)
-            mouse_up("left")
+            with _ilock():
+                self._ensure_focus()
+                move_to(sx, sy)
+                time.sleep(0.04)
+                mouse_down("left")
+                time.sleep(0.03)
+                mouse_up("left")
             click_count += 1
             time.sleep(0.15)
             frame = self._wincap.get_screenshot()
             if frame is not None:
+                if self._check_restart(frame):
+                    return
                 self._push_scan_frame(frame)
             time.sleep(0.1)
             _, pickup_new = self._find_npc()
@@ -330,20 +544,23 @@ class BotEngine:
         sx, sy = self._wincap.get_screen_position(win_pos)
         dx = int(self.cfg.drag_dist * 0.5)
         dy = int(self.cfg.drag_dist * 0.87)
-        move_to(sx, sy)
-        time.sleep(0.1)
-        key_down("ctrl")
-        time.sleep(0.1)
-        mouse_down("left")
-        time.sleep(0.1)
-        steps = 5
-        for i in range(1, steps + 1):
-            move_to(sx + int(dx * i / steps), sy + int(dy * i / steps))
-            time.sleep(0.02)
-        time.sleep(0.1)
-        mouse_up("left")
-        time.sleep(0.05)
-        key_up("ctrl")
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            move_to(sx, sy)
+            time.sleep(0.1)
+            key_down("ctrl")
+            time.sleep(0.1)
+            mouse_down("left")
+            time.sleep(0.1)
+            steps = 5
+            for i in range(1, steps + 1):
+                move_to(sx + int(dx * i / steps), sy + int(dy * i / steps))
+                time.sleep(0.02)
+            time.sleep(0.1)
+            mouse_up("left")
+            time.sleep(0.05)
+            key_up("ctrl")
 
     def _is_dialog_open(self, frame) -> bool:
         result = cv2.matchTemplate(frame, self._close_tmpl, cv2.TM_CCOEFF_NORMED)
@@ -354,6 +571,14 @@ class BotEngine:
         result = cv2.matchTemplate(frame, self._restart_tmpl, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
         return max_val >= 0.8, max_loc
+
+    def _check_restart(self, frame) -> bool:
+        """restart 버튼 감지 시 즉시 처리. True 반환이면 호출측은 즉시 return."""
+        dead, restart_loc = self._is_dead(frame)
+        if dead:
+            self._handle_death(frame, restart_loc)
+            return True
+        return False
 
     def _check_weight_red(self, frame) -> bool:
         now = time.time()
@@ -369,6 +594,27 @@ class BotEngine:
             self.log(f"[WEIGHT] 무게 초과 감지! (빨강 비율={ratio:.2f})")
             return True
         return False
+
+    def _is_in_zone(self, frame) -> bool:
+        if self._zone_tmpl is None:
+            self.log("[ZONE] 템플릿 없음 → 통과")
+            return True
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        tmpl_gray = cv2.cvtColor(self._zone_tmpl, cv2.COLOR_BGR2GRAY)
+        result = cv2.matchTemplate(gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+        self.log(f"[ZONE] score={max_val:.3f}")
+        return max_val >= 0.70
+
+    def _is_mp_full(self, frame) -> bool:
+        mx, my = self.cfg.mp_full_pos
+        roi = frame[my - 5:my + 5, mx - 5:mx + 5]
+        if roi.size == 0:
+            return False
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        mask = ((hsv[:,:,0] >= 80) & (hsv[:,:,0] <= 140)
+                & (hsv[:,:,1] > 20) & (hsv[:,:,2] > 60))
+        return np.sum(mask) / mask.size > 0.3
 
     def _check_hp_green_and_press(self, frame):
         """HP바가 초록이면 F8 (쿨타임 적용)"""
@@ -389,7 +635,7 @@ class BotEngine:
                 return
             self._last_hp_f8_t = now
             self.log(f"[HP] 초록 감지 → F8  (비율={ratio:.2f})")
-            press("f8")
+            self._ipress("f8")
 
     def _find_item(self, frame, tmpl, name="item"):
         result = cv2.matchTemplate(frame, tmpl, cv2.TM_CCOEFF_NORMED)
@@ -404,28 +650,34 @@ class BotEngine:
         return None
 
     def _type_number(self, num_str):
-        for ch in num_str:
-            press(ch)
-            time.sleep(0.05)
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            for ch in num_str:
+                press(ch)
+                time.sleep(0.05)
 
     def _type_location_cmd(self):
-        press("enter")
-        time.sleep(0.1)
-        press("/")
-        time.sleep(0.05)
-        press("hangul")
-        time.sleep(0.05)
-        for k in ["d", "n", "l"]:
-            press(k)
-            time.sleep(0.02)
-        time.sleep(0.05)
-        for k in ["c", "l"]:
-            press(k)
-            time.sleep(0.02)
-        time.sleep(0.05)
-        press("hangul")
-        time.sleep(0.05)
-        press("enter")
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            press("enter")
+            time.sleep(0.1)
+            press("/")
+            time.sleep(0.05)
+            press("hangul")
+            time.sleep(0.05)
+            for k in ["d", "n", "l"]:
+                press(k)
+                time.sleep(0.02)
+            time.sleep(0.05)
+            for k in ["c", "l"]:
+                press(k)
+                time.sleep(0.02)
+            time.sleep(0.05)
+            press("hangul")
+            time.sleep(0.05)
+            press("enter")
         time.sleep(0.2)
         self.log("[CHAT] /위치 입력 완료")
 
@@ -460,16 +712,18 @@ class BotEngine:
     # 창고 / 복귀
     # ──────────────────────────────────────────
     def _run_warehouse(self):
-        if self.cfg.use_clan_warehouse:
-            self._run_clan_warehouse()
-        else:
-            self._run_personal_warehouse()
+        self._acquire_focus_lease()
+        try:
+            if self.cfg.use_clan_warehouse:
+                self._run_clan_warehouse()
+            else:
+                self._run_personal_warehouse()
+        finally:
+            self._release_focus_lease()
 
     def _run_personal_warehouse(self):
         self.log("[WAREHOUSE] 개인 창고 루틴 시작")
-        key_down(self.cfg.scroll_key)
-        time.sleep(0.1)
-        key_up(self.cfg.scroll_key)
+        self._ikey(self.cfg.scroll_key)
         time.sleep(1.0)
 
         for _ in range(30):
@@ -481,18 +735,20 @@ class BotEngine:
 
         self._click_move(self.cfg.warehouse_scroll_click)
         self.log(f"[WAREHOUSE] 두루마리 클릭  pos={self.cfg.warehouse_scroll_click}")
-        time.sleep(self.cfg.scroll_wait)
+        self._interruptible_sleep(self.cfg.scroll_wait)
+        if not self._running:
+            return
 
         chk = self._wincap.get_screenshot()
         if self._is_dialog_open(chk):
-            key_down("esc")
-            time.sleep(0.1)
-            key_up("esc")
+            self._ikey("esc")
             time.sleep(0.5)
 
         self._click_move(self.cfg.warehouse_npc_click)
         self.log(f"[WAREHOUSE] 창고 지기 클릭  pos={self.cfg.warehouse_npc_click}")
-        time.sleep(2.0)
+        self._interruptible_sleep(2.0)
+        if not self._running:
+            return
 
         for _ in range(30):
             chk = self._wincap.get_screenshot()
@@ -514,9 +770,7 @@ class BotEngine:
 
     def _run_clan_warehouse(self):
         self.log("[CLAN_WH] 혈맹 창고 루틴 시작")
-        key_down(self.cfg.scroll_key)
-        time.sleep(0.1)
-        key_up(self.cfg.scroll_key)
+        self._ikey(self.cfg.scroll_key)
         time.sleep(1.0)
 
         for _ in range(30):
@@ -528,18 +782,21 @@ class BotEngine:
 
         self._click_move(self.cfg.clan_warehouse_scroll_click)
         self.log(f"[CLAN_WH] 두루마리 클릭  pos={self.cfg.clan_warehouse_scroll_click}")
-        time.sleep(self.cfg.scroll_wait)
+        self.log(f"[CLAN_WH] 이동 대기 → {self.cfg.scroll_wait}초")
+        self._interruptible_sleep(self.cfg.scroll_wait)
+        if not self._running:
+            return
 
         chk = self._wincap.get_screenshot()
         if self._is_dialog_open(chk):
-            key_down("esc")
-            time.sleep(0.1)
-            key_up("esc")
+            self._ikey("esc")
             time.sleep(0.5)
 
         self._click_move(self.cfg.clan_warehouse_npc_click)
         self.log(f"[CLAN_WH] 혈맹 창고지기 클릭  pos={self.cfg.clan_warehouse_npc_click}")
-        time.sleep(2.0)
+        self._interruptible_sleep(2.0)
+        if not self._running:
+            return
 
         for _ in range(30):
             chk = self._wincap.get_screenshot()
@@ -558,15 +815,15 @@ class BotEngine:
         self.log(f"[CLAN_WH] OK 클릭  pos={self.cfg.clan_warehouse_ok_click}")
         time.sleep(1.0)
 
-        self.log("[CLAN_WH] 사냥터 복귀 시작")
         self._scroll_return()
         self.log("[CLAN_WH] 혈맹 창고 루틴 완료")
 
     def _scroll_to_top(self, count=15):
-        """창고 아이템 목록을 맨 위로 스크롤"""
         self.log(f"    스크롤 업 {count}회 (맨 위로)")
         for _ in range(count):
-            scroll("up")
+            if not self._running:
+                return
+            self._iscroll("up")
             time.sleep(0.2)
 
     def _deposit_items(self, max_scroll_down=12):
@@ -578,6 +835,7 @@ class BotEngine:
             (self._mushroom_tmpl, "버섯포자의 즙"),
             (self._mithril_tmpl,  "미스릴 원석"),
             (self._bark_tmpl,     "엔트의 껍질"),
+            (self._pan_mane_tmpl, "판의 갈기털"),
         ]
         enabled_names = {d["name"] for d in self.cfg.deposit_items if d.get("enabled", True)}
         items = [(t, n) for t, n in items if t is not None and n in enabled_names]
@@ -587,8 +845,12 @@ class BotEngine:
 
         deposited = set()
         for step in range(max_scroll_down + 1):
+            if not self._running:
+                break
             frame = self._wincap.get_screenshot()
             for tmpl, name in items:
+                if not self._running:
+                    break
                 if name in deposited:
                     continue
                 pos = self._find_item(frame, tmpl, name)
@@ -603,34 +865,53 @@ class BotEngine:
                 break
             if step < max_scroll_down:
                 self.log(f"    스크롤 다운 {step+1}/{max_scroll_down}")
-                scroll("down")
+                self._iscroll("down")
                 time.sleep(0.4)
         missing = [n for _, n in items if n not in deposited]
         self.log(f"    맡기기 결과: 성공 {sorted(deposited)}  미발견 {missing}")
 
     def _scroll_return(self):
-        self.log("[RETURN] 두루마리로 복귀 시작")
-        key_down(self.cfg.scroll_key)
-        time.sleep(0.1)
-        key_up(self.cfg.scroll_key)
-        time.sleep(1.0)
-        for _ in range(30):
-            chk = self._wincap.get_screenshot()
-            if self._is_dialog_open(chk):
-                break
-            time.sleep(0.1)
-        time.sleep(0.3)
-        self._click_move(self.cfg.scroll_click)
-        self.log(f"[RETURN] 두루마리 클릭  pos={self.cfg.scroll_click}")
-        time.sleep(self.cfg.scroll_wait)
-        chk = self._wincap.get_screenshot()
-        if self._is_dialog_open(chk):
-            key_down("esc")
-            time.sleep(0.1)
-            key_up("esc")
-            time.sleep(0.5)
-        self.log("[RETURN] 복귀 완료")
-        self._post_return_move()
+        max_retry = 5
+        for retry in range(max_retry):
+            if not self._running:
+                return
+
+            # F9 → 마을 복귀
+            self.log("[RETURN] F9 실행 → 3초 대기")
+            self._ikey_force("f9")
+            self._interruptible_sleep(3)
+            if not self._running:
+                return
+
+            # 바투 F5 × 3회 (3초 간격)
+            self.log("[RETURN] 바투 F5 × 3회 시작")
+            for i in range(1, 4):
+                if not self._running:
+                    return
+                self._ikey_force("f5")
+                self.log(f"[RETURN] F5 ({i}/3)")
+                self._interruptible_sleep(3)
+
+            # 5초 대기
+            self.log("[RETURN] 5초 대기")
+            self._interruptible_sleep(5)
+            if not self._running:
+                return
+
+            # F11 → 요정 숲 이동 → 3초 대기 후 확인
+            self.log("[RETURN] F11 실행")
+            self._ikey_force("f11")
+            self._interruptible_sleep(3)
+            if not self._running:
+                return
+
+            frame = self._wincap.get_screenshot()
+            if frame is None or self._is_in_zone(frame):
+                self.log("[RETURN] 요정 숲 확인 → 패트롤 시작")
+                return
+            self.log(f"[RETURN] 요정 숲 아님 → 재시도 ({retry+1}/{max_retry})")
+
+        self.log("[RETURN] 최대 재시도 초과 → 현재 위치에서 패트롤 시작")
 
     def _push_scan_frame(self, frame):
         """스캐너 프로세스에 프레임 전달 (헬퍼)"""
@@ -658,9 +939,7 @@ class BotEngine:
         time.sleep(1.0)
         chk = self._wincap.get_screenshot()
         if chk is not None and self._is_dialog_open(chk):
-            key_down("esc")
-            time.sleep(0.1)
-            key_up("esc")
+            self._ikey("esc")
             time.sleep(0.5)
             self.log("[RETURN] 잔여 대화창 ESC 처리")
 
@@ -749,13 +1028,29 @@ class BotEngine:
         rx = restart_loc[0] + rw // 2
         ry = restart_loc[1] + rh // 2
         sx, sy = self._wincap.get_screen_position((rx, ry))
-        move_to(sx, sy)
-        time.sleep(0.1)
-        mouse_down("left")
-        time.sleep(0.03)
-        mouse_up("left")
-        self.log(f"[DEAD] 사망 감지 → Restart 클릭  ({rx},{ry})")
-        time.sleep(5.0)
+
+        while self._running:
+            with _ilock():
+                self._ensure_focus()
+                move_to(sx, sy)
+                time.sleep(0.1)
+                mouse_down("left")
+                time.sleep(0.03)
+                mouse_up("left")
+            self.log(f"[DEAD] 사망 감지 → Restart 클릭  ({rx},{ry})")
+            time.sleep(5.0)
+            chk = self._wincap.get_screenshot()
+            if chk is None:
+                continue
+            still_dead, new_loc = self._is_dead(chk)
+            if not still_dead:
+                break
+            self.log("[DEAD] Restart 버튼 아직 있음 → 재클릭")
+            rh2, rw2 = self._restart_tmpl.shape[:2]
+            rx = new_loc[0] + rw2 // 2
+            ry = new_loc[1] + rh2 // 2
+            sx, sy = self._wincap.get_screen_position((rx, ry))
+
         self.npc_pos = None
         self.log("[DEAD] 부활 완료 → 창고 루틴")
         self._run_warehouse()
@@ -764,11 +1059,14 @@ class BotEngine:
         self._set_state("PATROL")
 
     def _handle_revive_fail(self):
-        key_down("ctrl")
-        time.sleep(0.3)
-        press("q")
-        time.sleep(0.3)
-        key_up("ctrl")
+        with _ilock():
+            if not self._ensure_focus():
+                return
+            key_down("ctrl")
+            time.sleep(0.3)
+            press("q")
+            time.sleep(0.3)
+            key_up("ctrl")
         time.sleep(2.0)
         for _ in range(30):
             chk = self._wincap.get_screenshot()
@@ -808,9 +1106,18 @@ class BotEngine:
     # 메인 루프
     # ──────────────────────────────────────────
     def _main_loop(self):
+        try:
+            self._main_loop_inner()
+        except Exception as e:
+            import traceback
+            self.log(f"[오류] 봇 스레드 예외 발생 → 중지\n{traceback.format_exc()}")
+            self._running = False
+
+    def _main_loop_inner(self):
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = 0.0
         self._last_stuck_check_t = 0.0
+        self._last_zone_check_t = time.time()
         self._patrol_history = []
         self._patrol_no_move_count = 0
         self._dir_idx = random.randint(0, 7)
@@ -818,6 +1125,8 @@ class BotEngine:
         self._scan_pause_until = 0.0
         self._set_state("PATROL")
         self.log("봇 시작 (템플릿 매칭)  P=일시정지  Q=종료  F12=긴급종료")
+        self.log("3초 후 시작...")
+        self._interruptible_sleep(3.0)
 
         # 이전 실행의 잔여 결과 제거
         try:
@@ -877,19 +1186,20 @@ class BotEngine:
                 if dlg_score >= 0.7:
                     if self._check_revive_chat(frame):
                         self.log("[DEAD] 대화창 + 부활 감지 → ESC → Ctrl+Q")
-                        key_down("esc")
-                        time.sleep(0.3)
-                        key_up("esc")
+                        self._ikey("esc", delay=0.3)
                         time.sleep(1.0)
                         self._handle_revive_fail()
                         continue
-                    key_up("ctrl")
-                    mouse_up("left")
-                    self._pickup_lmb_held = False  # 대화창 처리로 LMB 해제됨 → 플래그 동기화
-                    time.sleep(0.05)
-                    key_down("esc")
-                    time.sleep(0.1)
-                    key_up("esc")
+                    with _ilock():
+                        if not self._ensure_focus():
+                            continue
+                        key_up("ctrl")
+                        mouse_up("left")
+                        self._pickup_lmb_held = False  # 대화창 처리로 LMB 해제됨 → 플래그 동기화
+                        time.sleep(0.05)
+                        key_down("esc")
+                        time.sleep(0.1)
+                        key_up("esc")
                     self.log(f"[DIALOG] 대화창 감지 → ESC  score={dlg_score:.3f}")
                     time.sleep(0.15)
                     if self.state == "FIGHTING" and self.npc_pos is not None:
@@ -911,6 +1221,22 @@ class BotEngine:
                 self._set_state("PATROL")
                 continue
 
+            # ── 30초마다 요정 숲 체크 ──
+            if (self._zone_tmpl is not None
+                    and self.state in ("PATROL", "APPROACH", "FIGHTING")
+                    and now - self._last_zone_check_t >= 30.0):
+                self._last_zone_check_t = now
+                if not self._is_in_zone(frame):
+                    self.log("[ZONE] 요정 숲 이탈 감지 → F9 복귀")
+                    self._scroll_return()
+                    self.npc_pos = None
+                    self._last_npc_found_t = time.time()
+                    self._last_zone_check_t = time.time()
+                    self._set_state("PATROL")
+                    continue
+                else:
+                    self.log("[ZONE] 요정 숲 확인 OK")
+
             # ── PATROL ──
             if self.state == "PATROL":
                 self._do_patrol(frame, now, elapsed)
@@ -929,8 +1255,9 @@ class BotEngine:
 
 
         # 종료 정리
-        key_up("ctrl")
-        mouse_up("left")
+        with _ilock():
+            key_up("ctrl")
+            mouse_up("left")
         self._pickup_lmb_held = False
         self.state = "IDLE"
         self.log("봇 중지됨")
@@ -1099,9 +1426,7 @@ class BotEngine:
         dlg_r = cv2.matchTemplate(frame, self._close_tmpl, cv2.TM_CCOEFF_NORMED)
         _, ds, _, _ = cv2.minMaxLoc(dlg_r)
         if ds >= 0.7:
-            key_down("esc")
-            time.sleep(0.1)
-            key_up("esc")
+            self._ikey("esc")
             self.log(f"[APPROACH] 대화창 → ESC  score={ds:.3f}")
             time.sleep(0.15)
             if self.npc_pos is not None:
@@ -1199,8 +1524,9 @@ class BotEngine:
         # 아이템 줍기
         if pickup is not None:
             self.log(f"[PICKUP] {self._last_pickup_name} 발견! 공격 중단 → 줍기  pos={pickup}")
-            key_up("ctrl")
-            mouse_up("left")
+            with _ilock():
+                key_up("ctrl")
+                mouse_up("left")
             self._pickup_lmb_held = False  # 공격 LMB 해제와 함께 상태 리셋
             time.sleep(0.3)
             self._run_pickup_until_gone(pickup)
@@ -1210,9 +1536,7 @@ class BotEngine:
                 time.sleep(1.5)
                 chk = self._wincap.get_screenshot()
                 if self._is_dialog_open(chk):
-                    key_down("esc")
-                    time.sleep(0.1)
-                    key_up("esc")
+                    self._ikey("esc")
                     time.sleep(0.5)
                 self._ctrl_drag_attack(self.npc_pos)
                 self._last_attack_t = time.time()
