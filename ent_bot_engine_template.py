@@ -1300,8 +1300,9 @@ class BotEngine:
             if elapsed >= self.cfg.move_wait_sec:
                 # 엔트 미발견 복귀
                 if now - self._last_npc_found_t >= self.cfg.npc_not_found_timeout:
-                    self.log(f"[RETURN] {self.cfg.npc_not_found_timeout:.0f}초간 엔트 미발견 → 두루마리 복귀")
-                    self._scroll_return()
+                    self.log(f"[RETURN] {self.cfg.npc_not_found_timeout:.0f}초간 엔트 미발견 → F11 순간이동")
+                    self._ikey_force("f11")
+                    self._interruptible_sleep(3)
                     self.npc_pos = None
                     self._last_npc_found_t = time.time()
                     self._state_enter_t = time.time()
