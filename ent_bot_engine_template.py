@@ -344,12 +344,16 @@ class BotEngine:
         if result is not None:
             self._scan_done = True
             npc = result['npc']
+            extra_npc = result.get('extra_npc')
             pickup = result['pickup']
             self._last_pickup_name = result.get('pickup_name') or "아이템"
             self._last_pickup_score = result.get('pickup_score', 0.0)
             self._last_scan_results = result['debug_results']
             if npc is not None:
                 self.log(f"[TMPL] '{self.cfg.npc_name}' 발견 → ({npc[0]},{npc[1]})")
+            elif extra_npc is not None and self.cfg.extra_npc_enabled:
+                npc = extra_npc
+                self.log(f"[TMPL] '{self.cfg.extra_npc_name}' 발견 → ({npc[0]},{npc[1]})")
             if pickup is not None:
                 self.log(f"[PICKUP] {self._last_pickup_name} score={self._last_pickup_score:.3f} → ({pickup[0]},{pickup[1]})")
             return npc, pickup
@@ -950,6 +954,7 @@ class BotEngine:
                 'npc_pos': self.npc_pos,
                 'focus_half': self._FOCUS_HALF,
                 'ocr_interval': self.cfg.ocr_interval,
+                'extra_npc_enabled': self.cfg.extra_npc_enabled,
             })
         except Exception:
             pass
@@ -1177,6 +1182,7 @@ class BotEngine:
                         'npc_pos': self.npc_pos,
                         'focus_half': self._FOCUS_HALF,
                         'ocr_interval': self.cfg.ocr_interval,
+                        'extra_npc_enabled': self.cfg.extra_npc_enabled,
                     })
                 except Exception:
                     pass  # 큐 가득 참 — 스킵

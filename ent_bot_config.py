@@ -80,6 +80,10 @@ class BotConfig:
         self.clan_warehouse_deposit_click = (65, 323)
         self.clan_warehouse_ok_click = (288, 555)
 
+        # 추가 공격 대상 (옵션)
+        self.extra_npc_enabled = False
+        self.extra_npc_name = "판"
+
         # 타이밍
         self.move_wait_sec = 2.0
         self.approach_wait_sec = 1.5
@@ -158,6 +162,7 @@ class BotConfig:
         "stuck_history_size", "stuck_radius", "stuck_check_interval",
         "stuck_no_move_max",
         "window_index",
+        "extra_npc_enabled", "extra_npc_name",
     ]
 
     def load(self, path: str):

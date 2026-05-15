@@ -22,7 +22,7 @@ PICKUP_THRESHOLDS = {
     "pickup_001.png": 0.85,   # 정령의 돌
     "pickup_002.png": 0.85,   # 정령의 돌 (변형)
     "pickup_003.png": 0.72,   # 버섯포자의 즙
-    "pickup_004.png": 0.72,   # 미스릴 원석
+    "pickup_004.png": 0.80,   # 미스릴 원석
 }
 
 
@@ -56,6 +56,17 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
             pickup_templates.append((gray, h, w, name))
             print(f"[TMPL] PICKUP 템플릿 로드: {name}  {w}x{h}")
 
+    # ── 추가 NPC 템플릿 로드 (extra_npc_*.png) ──
+    extra_npc_templates = []
+    for f in sorted(glob.glob(os.path.join(TMPL_DIR, "extra_npc_*.png"))):
+        tmpl = cv2.imread(f, cv2.IMREAD_COLOR)
+        if tmpl is not None:
+            gray = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
+            h, w = tmpl.shape[:2]
+            name = os.path.basename(f)
+            extra_npc_templates.append((gray, h, w, name))
+            print(f"[TMPL] EXTRA NPC 템플릿 로드: {name}  {w}x{h}")
+
     if not npc_templates:
         print("[TMPL] NPC 템플릿 없음! templates/npc_*.png 파일 필요")
         print("[TMPL] capture_npc_template.py 로 캡처하세요")
@@ -85,6 +96,7 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
         player_pos = data['player_pos']
         npc_pos = data['npc_pos']
         focus_half = data['focus_half']
+        extra_npc_enabled = data.get('extra_npc_enabled', False)
 
         fh, fw = frame.shape[:2]
 
@@ -117,17 +129,22 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
                 continue
 
             result = cv2.matchTemplate(game_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
+
+            # 최고 점수 항상 로그 (진단용)
+            _, max_val, _, max_loc = cv2.minMaxLoc(result)
+            print(f"[TMPL] NPC 최고점수={max_val:.3f} (임계값={NPC_THRESHOLD})", flush=True)
+
             locs = np.where(result >= NPC_THRESHOLD)
 
             for pt in zip(*locs[::-1]):  # (x, y) 순서
                 x1, y1 = int(pt[0]), int(pt[1])
                 score = float(result[y1, x1])
 
-                # 단어 경계 검사: 왼쪽에 글자가 있으면 더 긴 단어의 일부 → 스킵
-                # (예: "도에트"에서 "에트"가 "엔트"로 오매칭 방지)
+                # 단어 경계 검사
                 if x1 >= 5:
                     left_strip = game_gray[y1:y1+th, x1-5:x1]
-                    if left_strip.size > 0 and np.std(left_strip.astype(np.float32)) > 30:
+                    if left_strip.size > 0 and np.std(left_strip.astype(np.float32)) > 50:
+                        print(f"[TMPL] 경계 검사 탈락 score={score:.3f} x={x1}", flush=True)
                         continue
 
                 debug_results.append(
@@ -136,7 +153,7 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
                      name, score)
                 )
                 cx = x1 + tw // 2 + sx1
-                cy = y1 + th + 60 + sy1   # 텍스트 아래 = 몬스터 위치
+                cy = y1 + th + 60 + sy1
                 candidates.append((cx, cy, score))
 
         # NMS: 중복 제거 (가까운 매칭 중 최고 점수만 유지)
@@ -160,12 +177,37 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
                      x1 + tw + sx1, y1 + th + sy1,
                      name, score)
                 )
+                cx = x1 + tw // 2 + sx1
+                cy = y1 + th // 2 + sy1
+                if cx < 300:  # UI 영역 제외
+                    continue
                 if score > best_score:
                     best_score = score
-                    cx = x1 + tw // 2 + sx1
-                    cy = y1 + th // 2 + sy1
                     pickup_pos = (cx, cy)
                     pickup_name = name
+
+        # ── 추가 NPC 템플릿 매칭 (extra_npc_*.png) ──
+        extra_npc_found = None
+        if extra_npc_enabled and extra_npc_templates:
+            extra_candidates = []
+            for tmpl_gray, th, tw, name in extra_npc_templates:
+                if game_gray.shape[0] < th or game_gray.shape[1] < tw:
+                    continue
+                result = cv2.matchTemplate(game_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
+                _, max_val, _, max_loc = cv2.minMaxLoc(result)
+                print(f"[TMPL] EXTRA NPC 최고점수={max_val:.3f} (임계값={NPC_THRESHOLD})", flush=True)
+                locs = np.where(result >= NPC_THRESHOLD)
+                for pt in zip(*locs[::-1]):
+                    x1, y1 = int(pt[0]), int(pt[1])
+                    score = float(result[y1, x1])
+                    cx = x1 + tw // 2 + sx1
+                    cy = y1 + th + 60 + sy1
+                    extra_candidates.append((cx, cy, score))
+            extra_candidates = _nms(extra_candidates, min_dist=40)
+            if extra_candidates:
+                ref = fight_npc_pos if (state in ("FIGHTING", "ATTACK") and fight_npc_pos) else (npc_pos or player_pos)
+                extra_candidates.sort(key=lambda c: abs(c[0] - ref[0]) + abs(c[1] - ref[1]))
+                extra_npc_found = (extra_candidates[0][0], extra_candidates[0][1])
 
         # 가장 가까운 NPC 선택 (ocr_process와 동일 로직)
         npc_found = None
@@ -183,6 +225,7 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
 
         result_q.put({
             'npc': npc_found,
+            'extra_npc': extra_npc_found,
             'pickup': pickup_pos,
             'pickup_name': pickup_name,
             'pickup_score': best_score if pickup_pos is not None else 0.0,

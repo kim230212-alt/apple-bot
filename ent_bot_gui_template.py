@@ -75,10 +75,6 @@ class BotGUI:
                                      foreground="#FFD700")
         self.state_label.pack(side="left", padx=8)
 
-        if _HAS_AUTO_LOGIN:
-            self.login_btn = ttk.Button(bar, text="자동 접속", command=self._on_auto_login)
-            self.login_btn.pack(side="left", padx=2)
-
         ttk.Label(bar, text="Template | F12=긴급종료", foreground="gray").pack(side="right")
 
     def _build_main(self):
@@ -153,15 +149,39 @@ class BotGUI:
         self._check_vars["patrol_random"] = patrol_rand_var
         patrol_rand_check = ttk.Checkbutton(inner, text="랜덤 순찰", variable=patrol_rand_var,
                                              command=self._on_checkbox_toggle)
-        patrol_rand_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 8))
+        patrol_rand_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         row += 1
+
+        extra_npc_var = tk.BooleanVar(value=self.config.extra_npc_enabled)
+        self._check_vars["extra_npc_enabled"] = extra_npc_var
+        extra_npc_check = ttk.Checkbutton(inner, text=f"추가 공격 ({self.config.extra_npc_name})", variable=extra_npc_var,
+                                           command=self._on_checkbox_toggle)
+        extra_npc_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 8))
+        row += 1
+
+        # ── 맡길 아이템 리스트 (체크박스) ──
+        ttk.Label(inner, text="── 맡길 아이템 ──", font=("", 9, "bold")).grid(
+            row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2)
+        )
+        row += 1
+        self._deposit_item_vars = []  # [(item_dict, BooleanVar), ...]
+        for item in self.config.deposit_items:
+            var = tk.BooleanVar(value=item.get("enabled", True))
+            cb = ttk.Checkbutton(inner, text=item.get("name", "?"), variable=var,
+                                  command=self._on_deposit_items_toggle)
+            cb.grid(row=row, column=0, columnspan=2, sticky="w", padx=8, pady=1)
+            self._deposit_item_vars.append((item, var))
+            row += 1
 
         # ── 자동 로그인 설정 ──
         if _HAS_AUTO_LOGIN:
             login_cfg = load_login_config()
 
-            ttk.Label(inner, text="── 자동 로그인 ──", font=("", 9, "bold")).grid(
-                row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(8, 2))
+            login_hdr = ttk.Frame(inner)
+            login_hdr.grid(row=row, column=0, columnspan=2, sticky="ew", padx=4, pady=(8, 2))
+            ttk.Label(login_hdr, text="── 자동 로그인 ──", font=("", 9, "bold")).pack(side="left")
+            self.login_btn = ttk.Button(login_hdr, text="자동 접속", command=self._on_auto_login, width=10)
+            self.login_btn.pack(side="right")
             row += 1
 
             auto_login_var = tk.BooleanVar(value=login_cfg.get("auto_login", True))
@@ -199,7 +219,11 @@ class BotGUI:
                 continue
             ttk.Label(inner, text=label_text).grid(row=row, column=0, sticky="w", padx=4, pady=1)
             val = getattr(self.config, key, "")
-            var = tk.StringVar(value="" if val is None else str(val))
+            if isinstance(val, list):
+                display = ",".join(str(v) for v in val)
+            else:
+                display = "" if val is None else str(val)
+            var = tk.StringVar(value=display)
             entry = ttk.Entry(inner, textvariable=var, width=12)
             entry.grid(row=row, column=1, sticky="ew", padx=4, pady=1)
             self._setting_vars[key] = var
@@ -265,14 +289,18 @@ class BotGUI:
         self._append_log("[자동접속] 시작...")
 
         def worker():
+            success = False
             try:
                 from auto_login import run_auto_login, load_config as load_login_config
                 cfg = load_login_config()
-                run_auto_login(cfg, self._append_log)
+                success = bool(run_auto_login(cfg, self._append_log, init_devices=False))
             except Exception as e:
                 self._append_log(f"[자동접속] 오류: {e}")
             finally:
                 self.root.after(0, lambda: self.login_btn.configure(state="normal"))
+                if success:
+                    self._append_log("[자동접속] 완료 → 엔진 재초기화")
+                    self.root.after(0, self._init_async)
 
         threading.Thread(target=worker, daemon=True).start()
 
@@ -325,6 +353,14 @@ class BotGUI:
         self.config.save(CONFIG_PATH)
         self._append_log("[설정] 체크박스 변경 → 저장 완료")
 
+    def _on_deposit_items_toggle(self):
+        """맡길 아이템 체크박스 변경 → config.deposit_items[i].enabled 반영 + 저장"""
+        for item, var in self._deposit_item_vars:
+            item["enabled"] = var.get()
+        self.config.save(CONFIG_PATH)
+        enabled = [i["name"] for i, v in self._deposit_item_vars if v.get()]
+        self._append_log(f"[설정] 맡길 아이템: {', '.join(enabled) if enabled else '(없음)'}")
+
     # ──────────────────────────────────────────
     # 설정 적용
     # ──────────────────────────────────────────
@@ -339,6 +375,9 @@ class BotGUI:
                 if isinstance(cur, tuple):
                     parts = raw.strip("() ").split(",")
                     setattr(self.config, key, tuple(int(p.strip()) for p in parts))
+                elif isinstance(cur, list):
+                    setattr(self.config, key,
+                            [p.strip() for p in raw.split(",") if p.strip()])
                 elif isinstance(cur, float):
                     setattr(self.config, key, float(raw))
                 elif isinstance(cur, int):
