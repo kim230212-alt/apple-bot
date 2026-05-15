@@ -886,8 +886,25 @@ class BotEngine:
         missing = [n for _, n in items if n not in deposited]
         self.log(f"    맡기기 결과: 성공 {sorted(deposited)}  미발견 {missing}")
 
+    def _do_f9_return(self):
+        """F9 → 마을 복귀 (F5×3 포함). _f11_to_zone / _scroll_return 공용."""
+        self.log("[RETURN] F9 실행 → 3초 대기")
+        self._ikey_force("f9")
+        self._interruptible_sleep(3)
+        if not self._running:
+            return
+        self.log("[RETURN] 바투 F5 × 3회 시작")
+        for i in range(1, 4):
+            if not self._running:
+                return
+            self._ikey_force("f5")
+            self.log(f"[RETURN] F5 ({i}/3)")
+            self._interruptible_sleep(3)
+        self.log("[RETURN] 5초 대기")
+        self._interruptible_sleep(5)
+
     def _f11_to_zone(self, max_retry: int = 5):
-        """F11 순간이동 후 요정 숲 확인. 실패 시 최대 max_retry회 재시도."""
+        """F11 순간이동 후 요정 숲 확인. 실패 시 F9 복귀 후 재시도."""
         for retry in range(max_retry):
             if not self._running:
                 return
@@ -900,7 +917,8 @@ class BotEngine:
             if frame is None or self._is_in_zone(frame):
                 self.log("[F11] 요정 숲 확인 완료")
                 return
-            self.log("[F11] 요정 숲 아님 → 재시도")
+            self.log("[F11] 요정 숲 아님 → F9 복귀 후 재시도")
+            self._do_f9_return()
         self.log("[F11] 최대 재시도 초과 → 현재 위치에서 진행")
 
     def _scroll_return(self):
@@ -908,35 +926,13 @@ class BotEngine:
         for retry in range(max_retry):
             if not self._running:
                 return
-
-            # F9 → 마을 복귀
-            self.log("[RETURN] F9 실행 → 3초 대기")
-            self._ikey_force("f9")
-            self._interruptible_sleep(3)
+            self._do_f9_return()
             if not self._running:
                 return
-
-            # 바투 F5 × 3회 (3초 간격)
-            self.log("[RETURN] 바투 F5 × 3회 시작")
-            for i in range(1, 4):
-                if not self._running:
-                    return
-                self._ikey_force("f5")
-                self.log(f"[RETURN] F5 ({i}/3)")
-                self._interruptible_sleep(3)
-
-            # 5초 대기
-            self.log("[RETURN] 5초 대기")
-            self._interruptible_sleep(5)
-            if not self._running:
-                return
-
-            # F11 → 요정 숲 이동 확인
             self._f11_to_zone()
             if self._running:
                 self.log("[RETURN] 요정 숲 확인 → 패트롤 시작")
                 return
-
         self.log("[RETURN] 최대 재시도 초과 → 현재 위치에서 패트롤 시작")
 
     def _push_scan_frame(self, frame):
