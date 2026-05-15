@@ -42,12 +42,18 @@ class BotConfig:
 
         # 무게
         self.weight_pos = (55, 866)
+        self.weight_bar = [46, 855, 102, 876]   # [x1, y1, x2, y2] 바 전체 범위
+        self.weight_threshold = 0.5             # 창고 이동 기준 (0.0~1.0)
         self.weight_check_interval = 30.0
 
         # HP 초록 감지 → F8 (물약)
         self.hp_pos = (552, 768)
         self.hp_check_interval = 10.0
         self.hp_f8_cooldown = 3.0
+
+        # MP 풀 감지 (복귀 후 대기)
+        self.mp_full_pos = (962, 833)
+        self.mp_wait_timeout = 120
 
         # 창고
         self.warehouse_scroll_click = (57, 122)
@@ -64,6 +70,7 @@ class BotConfig:
             {"name": "버섯포자의 즙",   "enabled": True},
             {"name": "미스릴 원석",     "enabled": True},
             {"name": "엔트의 껍질",     "enabled": True},
+            {"name": "판의 갈기털",     "enabled": True},
         ]
 
         # 혈맹 창고
@@ -116,6 +123,10 @@ class BotConfig:
         self.keyboard_device = None
         self.mouse_device = None
 
+        # 멀티 인스턴스: 같은 이름 창이 여러 개일 때 몇 번째 창을 쓸지 (X좌표 정렬)
+        # 0 = 왼쪽(기본), 1 = 오른쪽
+        self.window_index = 0
+
         # ── 로드 ──────────────────────────────────
         self._path = config_path
         if config_path and os.path.exists(config_path):
@@ -132,7 +143,9 @@ class BotConfig:
         "drag_dist", "atk_confirm_timeout", "reattack_fail_max",
         "escape_retry_max", "approach_fail_max", "close_enough",
         "scroll_key", "scroll_click", "scroll_wait",
-        "weight_pos", "hp_pos", "hp_check_interval", "hp_f8_cooldown",
+        "weight_pos", "weight_bar", "weight_threshold",
+        "hp_pos", "hp_check_interval", "hp_f8_cooldown",
+        "mp_full_pos", "mp_wait_timeout",
         "player_pos", "chat_rect", "ocr_scan_rect",
         "npc_name", "pickup_keyword", "pickup_conf",
         "warehouse_npc_click", "warehouse_deposit_click",
@@ -144,6 +157,7 @@ class BotConfig:
         "clan_warehouse_deposit_click", "clan_warehouse_ok_click",
         "stuck_history_size", "stuck_radius", "stuck_check_interval",
         "stuck_no_move_max",
+        "window_index",
     ]
 
     def load(self, path: str):

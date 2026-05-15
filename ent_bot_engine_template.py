@@ -580,18 +580,30 @@ class BotEngine:
             return True
         return False
 
-    def _check_weight_red(self, frame) -> bool:
+    def _check_weight_over(self, frame) -> bool:
         now = time.time()
         if now - self._last_weight_check_t < self.cfg.weight_check_interval:
             return False
         self._last_weight_check_t = now
-        wx, wy = self.cfg.weight_pos
-        roi = frame[wy - 5:wy + 5, wx - 5:wx + 5]
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        mask = (hsv[:, :, 0] < 8) & (hsv[:, :, 1] > 150)
-        ratio = np.sum(mask) / mask.size
-        if ratio > 0.3:
-            self.log(f"[WEIGHT] 무게 초과 감지! (빨강 비율={ratio:.2f})")
+
+        x1, y1, x2, y2 = self.cfg.weight_bar
+        bar_w = x2 - x1
+        if bar_w <= 0:
+            return False
+
+        # 바 ROI에서 주황색 픽셀 감지 (HSV: H=10~25, S>120, V>80)
+        cy = (y1 + y2) // 2
+        bar_roi = frame[y1:y2, x1:x2]
+        hsv = cv2.cvtColor(bar_roi, cv2.COLOR_BGR2HSV)
+        orange_mask = (
+            (hsv[:, :, 0] >= 10) & (hsv[:, :, 0] <= 25) &
+            (hsv[:, :, 1] > 120) &
+            (hsv[:, :, 2] > 80)
+        )
+        ratio = np.sum(orange_mask) / orange_mask.size
+        self.log(f"[WEIGHT] 주황 비율={ratio:.3f}")
+        if ratio > 0.05:
+            self.log("[WEIGHT] 주황 감지 → 창고 이동")
             return True
         return False
 
@@ -1214,7 +1226,7 @@ class BotEngine:
             self._check_hp_green_and_press(frame)
 
             # ── 무게 초과 ──
-            if self.state in ("PATROL", "FIGHTING") and self._check_weight_red(frame):
+            if self.state in ("PATROL", "FIGHTING") and self._check_weight_over(frame):
                 self._run_warehouse()
                 self.npc_pos = None
                 self._last_weight_check_t = time.time()
