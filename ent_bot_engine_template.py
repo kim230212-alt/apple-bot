@@ -1064,7 +1064,9 @@ class BotEngine:
             sx, sy = self._wincap.get_screen_position((rx, ry))
 
         self.npc_pos = None
-        self.log("[DEAD] 부활 완료 → 패트롤 시작")
+        self.log("[DEAD] 부활 완료 → F11 순간이동")
+        self._ikey_force("f11")
+        self._interruptible_sleep(3)
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
@@ -1093,6 +1095,9 @@ class BotEngine:
         time.sleep(5.0)
         self._type_location_cmd()
         self.npc_pos = None
+        self.log("[DEAD] 부활 완료 → F11 순간이동")
+        self._ikey_force("f11")
+        self._interruptible_sleep(3)
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
