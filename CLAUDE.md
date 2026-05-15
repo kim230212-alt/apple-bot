@@ -122,6 +122,23 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - **F11 후 대기 1초 → 3초** (텔레포트 로딩 시간 확보)
 - **zone 임계값 0.821 → 0.70** (실제 score 0.51~0.59 측정됨, 조정 필요 시 `_is_in_zone` 참고)
 
+### 2026-05-16 작업
+
+#### 판 NPC 추가 공격 옵션 (`extra_npc_enabled`)
+- `ent_bot_config.py`: `extra_npc_enabled=False`, `extra_npc_name="판"` 추가, `_PERSIST_KEYS` 등록
+- `template_scanner.py`: `extra_npc_*.png` 별도 로드, `extra_npc_enabled` 플래그 수신, 결과에 `extra_npc` 포함
+- `ent_bot_engine_template.py`: `_find_npc()`에서 primary NPC 없을 때 extra_npc fallback
+- `ent_bot_gui_template.py`: "추가 공격 (판)" 체크박스 추가
+- `ent_bot_gui_dual.py`: "판공격" 체크박스 추가
+- `ent_config.json`, `ent_config2.json`: `extra_npc_enabled: true` 추가
+- 템플릿 파일: `templates/extra_npc_001.png` (판 NPC 이름 텍스트 캡처)
+
+#### F11/F9 복귀 로직 개선 (`ent_bot_engine_template.py`)
+- **`_do_f9_return()`** 신규: F9 → 3초 → F5×3 → 5초 공용 복귀 시퀀스
+- **`_f11_to_zone()`**: F11 후 요정 숲 아니면 `_do_f9_return()` 호출 후 재시도 (기존: F11만 반복)
+- **`_scroll_return()`**: `_do_f9_return()` + `_f11_to_zone()` 조합으로 단순화 (순환 없음)
+- 사망(`_handle_death`) / 부활 실패(`_handle_revive_fail`) 모두 `_f11_to_zone()` 호출이므로 자동 적용
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘
