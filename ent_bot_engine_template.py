@@ -882,6 +882,23 @@ class BotEngine:
         missing = [n for _, n in items if n not in deposited]
         self.log(f"    맡기기 결과: 성공 {sorted(deposited)}  미발견 {missing}")
 
+    def _f11_to_zone(self, max_retry: int = 5):
+        """F11 순간이동 후 요정 숲 확인. 실패 시 최대 max_retry회 재시도."""
+        for retry in range(max_retry):
+            if not self._running:
+                return
+            self.log(f"[F11] 순간이동 시도 ({retry+1}/{max_retry})")
+            self._ikey_force("f11")
+            self._interruptible_sleep(3)
+            if not self._running:
+                return
+            frame = self._wincap.get_screenshot()
+            if frame is None or self._is_in_zone(frame):
+                self.log("[F11] 요정 숲 확인 완료")
+                return
+            self.log("[F11] 요정 숲 아님 → 재시도")
+        self.log("[F11] 최대 재시도 초과 → 현재 위치에서 진행")
+
     def _scroll_return(self):
         max_retry = 5
         for retry in range(max_retry):
@@ -910,18 +927,11 @@ class BotEngine:
             if not self._running:
                 return
 
-            # F11 → 요정 숲 이동 → 3초 대기 후 확인
-            self.log("[RETURN] F11 실행")
-            self._ikey_force("f11")
-            self._interruptible_sleep(3)
-            if not self._running:
-                return
-
-            frame = self._wincap.get_screenshot()
-            if frame is None or self._is_in_zone(frame):
+            # F11 → 요정 숲 이동 확인
+            self._f11_to_zone()
+            if self._running:
                 self.log("[RETURN] 요정 숲 확인 → 패트롤 시작")
                 return
-            self.log(f"[RETURN] 요정 숲 아님 → 재시도 ({retry+1}/{max_retry})")
 
         self.log("[RETURN] 최대 재시도 초과 → 현재 위치에서 패트롤 시작")
 
@@ -1064,9 +1074,7 @@ class BotEngine:
             sx, sy = self._wincap.get_screen_position((rx, ry))
 
         self.npc_pos = None
-        self.log("[DEAD] 부활 완료 → F11 순간이동")
-        self._ikey_force("f11")
-        self._interruptible_sleep(3)
+        self._f11_to_zone()
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
@@ -1095,9 +1103,7 @@ class BotEngine:
         time.sleep(5.0)
         self._type_location_cmd()
         self.npc_pos = None
-        self.log("[DEAD] 부활 완료 → F11 순간이동")
-        self._ikey_force("f11")
-        self._interruptible_sleep(3)
+        self._f11_to_zone()
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
@@ -1301,8 +1307,7 @@ class BotEngine:
                 # 엔트 미발견 복귀
                 if now - self._last_npc_found_t >= self.cfg.npc_not_found_timeout:
                     self.log(f"[RETURN] {self.cfg.npc_not_found_timeout:.0f}초간 엔트 미발견 → F11 순간이동")
-                    self._ikey_force("f11")
-                    self._interruptible_sleep(3)
+                    self._f11_to_zone()
                     self.npc_pos = None
                     self._last_npc_found_t = time.time()
                     self._state_enter_t = time.time()
