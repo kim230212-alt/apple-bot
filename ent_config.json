@@ -37,6 +37,13 @@
     55,
     866
   ],
+  "weight_bar": [
+    46,
+    855,
+    102,
+    876
+  ],
+  "weight_threshold": 0.5,
   "hp_pos": [
     552,
     768
@@ -135,5 +142,7 @@
   "stuck_radius": 150,
   "stuck_check_interval": 60.0,
   "stuck_no_move_max": 8,
-  "window_index": 0
+  "window_index": 0,
+  "extra_npc_enabled": true,
+  "extra_npc_name": "판"
 }

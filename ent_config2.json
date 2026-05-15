@@ -135,5 +135,7 @@
   "stuck_radius": 150,
   "stuck_check_interval": 60.0,
   "stuck_no_move_max": 8,
-  "window_index": 1
+  "window_index": 1,
+  "extra_npc_enabled": true,
+  "extra_npc_name": "판"
 }

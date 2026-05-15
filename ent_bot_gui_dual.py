@@ -87,6 +87,10 @@ class BotPanel(ttk.LabelFrame):
         ttk.Checkbutton(ctrl, text="랜덤순찰", variable=self._patrol_rand_var,
                         command=self._save_checkboxes).pack(side="left", padx=6)
 
+        self._extra_npc_var = tk.BooleanVar(value=self.config.extra_npc_enabled)
+        ttk.Checkbutton(ctrl, text=f"판공격", variable=self._extra_npc_var,
+                        command=self._save_checkboxes).pack(side="left", padx=6)
+
         if _HAS_AUTO_LOGIN:
             self.login_btn = ttk.Button(ctrl, text="자동접속",
                                         command=self._on_auto_login, width=9)
@@ -95,6 +99,7 @@ class BotPanel(ttk.LabelFrame):
     def _save_checkboxes(self):
         self.config.use_clan_warehouse = self._clan_wh_var.get()
         self.config.patrol_random = self._patrol_rand_var.get()
+        self.config.extra_npc_enabled = self._extra_npc_var.get()
         self.config.save(self._config_path)
 
     def _build_log(self):
