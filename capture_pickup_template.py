@@ -54,12 +54,12 @@ def load_pickup_templates():
 
 
 def nms(hits, radius=NMS_RADIUS):
-    hits.sort(key=lambda h: -h[2])
+    hits.sort(key=lambda h: -h[1])
     final = []
     r2 = radius ** 2
     for h in hits:
-        cx, cy = h[3], h[4]
-        if any((cx - f[3]) ** 2 + (cy - f[4]) ** 2 < r2 for f in final):
+        cx, cy = h[2], h[3]
+        if any((cx - f[2]) ** 2 + (cy - f[3]) ** 2 < r2 for f in final):
             continue
         final.append(h)
     return final
