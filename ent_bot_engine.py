@@ -14,6 +14,8 @@ import threading
 import cv2
 import numpy as np
 
+_device_detect_lock = threading.Lock()
+
 ssl._create_default_https_context = ssl._create_unverified_context
 import easyocr
 import win32gui
@@ -24,6 +26,7 @@ from capture_window import WindowCapture
 from interception import (
     move_to, mouse_down, mouse_up, auto_capture_devices,
     click, press, key_down, key_up, set_devices, scroll,
+    get_keyboard, get_mouse,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -105,14 +108,45 @@ class BotEngine:
     # ──────────────────────────────────────────
     def initialize(self):
         """디바이스 감지, OCR 로딩, 템플릿 로딩 (느림 — 별도 스레드 권장)"""
-        self.log("디바이스 감지 중... (마우스 움직여주세요)")
-        auto_capture_devices(keyboard=True, mouse=True, verbose=True)
-
         kb = self.cfg.keyboard_device
         ms = self.cfg.mouse_device
-        if kb is not None or ms is not None:
+
+        def _kb_valid(k):
+            try:
+                from interception.inputs import _g_context as _icp_ctx
+                return (k is not None and
+                        k < len(_icp_ctx.devices) and
+                        _icp_ctx.devices[k].handle not in (-1, 0, None))
+            except Exception:
+                return False
+
+        if kb is not None and ms is not None and _kb_valid(kb):
             set_devices(keyboard=kb, mouse=ms)
-            self.log(f"디바이스 오버라이드  KB={kb}  Mouse={ms}")
+            self.log(f"디바이스 설정 (캐시)  KB={kb}  Mouse={ms}")
+        else:
+            if kb is not None and not _kb_valid(kb):
+                self.log(f"[WARN] KB={kb} 이 컴퓨터에서 유효하지 않음 → 재감지")
+            with _device_detect_lock:
+                kb = self.cfg.keyboard_device
+                ms = self.cfg.mouse_device
+                if kb is not None and ms is not None and _kb_valid(kb):
+                    set_devices(keyboard=kb, mouse=ms)
+                    self.log(f"디바이스 설정 (재확인 캐시)  KB={kb}  Mouse={ms}")
+                else:
+                    self.log("디바이스 감지 중... (마우스 움직여주세요)")
+                    auto_capture_devices(keyboard=True, mouse=True, verbose=True)
+            kb = self.cfg.keyboard_device
+            ms = self.cfg.mouse_device
+            if kb is not None or ms is not None:
+                set_devices(keyboard=kb, mouse=ms)
+                self.log(f"디바이스 오버라이드  KB={kb}  Mouse={ms}")
+                if ms is None:
+                    detected_ms = get_mouse()
+                    if detected_ms is not None:
+                        self.cfg.mouse_device = detected_ms
+                        if self.cfg._path:
+                            self.cfg.save()
+                        self.log(f"[MS] 마우스 디바이스 저장: {detected_ms}")
 
         self._wincap = WindowCapture(self.cfg.window_title)
         self.log(f"창 감지 완료  ({self._wincap.offset_x}, {self._wincap.offset_y})")
@@ -182,6 +216,13 @@ class BotEngine:
     def resume(self):
         self._paused = False
         self.log("재개")
+
+    def _interruptible_sleep(self, secs: float):
+        end = time.time() + secs
+        while self._running and time.time() < end:
+            if self._paused:
+                end += 0.1
+            time.sleep(0.1)
 
     @property
     def is_running(self):
@@ -258,6 +299,8 @@ class BotEngine:
             frame = self._wincap.get_screenshot()
             if frame is None:
                 continue
+            if self._check_restart(frame):
+                return
             _, pickup_new = self._find_npc_ocr(frame)
             if pickup_new is None:
                 miss += 1
@@ -307,18 +350,36 @@ class BotEngine:
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
         return max_val >= 0.8, max_loc
 
-    def _check_weight_red(self, frame) -> bool:
+    def _check_restart(self, frame) -> bool:
+        """restart 버튼 감지 시 즉시 처리. True 반환이면 호출측은 즉시 return."""
+        dead, restart_loc = self._is_dead(frame)
+        if dead:
+            self._handle_death(frame, restart_loc)
+            return True
+        return False
+
+    def _check_weight_over(self, frame) -> bool:
         now = time.time()
         if now - self._last_weight_check_t < self.cfg.weight_check_interval:
             return False
         self._last_weight_check_t = now
-        wx, wy = self.cfg.weight_pos
-        roi = frame[wy - 5:wy + 5, wx - 5:wx + 5]
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        mask = (hsv[:, :, 0] < 8) & (hsv[:, :, 1] > 150)
-        ratio = np.sum(mask) / mask.size
-        if ratio > 0.3:
-            self.log(f"[WEIGHT] 무게 초과 감지! (빨강 비율={ratio:.2f})")
+
+        x1, y1, x2, y2 = self.cfg.weight_bar
+        bar_w = x2 - x1
+        if bar_w <= 0:
+            return False
+
+        cy = (y1 + y2) // 2
+        bar_roi = frame[cy - 2:cy + 3, x1:x2]
+        hsv = cv2.cvtColor(bar_roi, cv2.COLOR_BGR2HSV)
+        filled_cols = np.any(hsv[:, :, 2] > 60, axis=0)
+        filled_len = int(np.argmin(filled_cols[::-1])) if not np.all(filled_cols) else bar_w
+        percent = filled_len / bar_w
+
+        threshold = getattr(self.cfg, 'weight_threshold', 0.5)
+        self.log(f"[WEIGHT] 무게 {percent:.0%}  (기준 {threshold:.0%})")
+        if percent >= threshold:
+            self.log(f"[WEIGHT] 창고 이동 기준 초과!")
             return True
         return False
 
@@ -500,7 +561,9 @@ class BotEngine:
 
         self._click_move(self.cfg.warehouse_scroll_click)
         self.log(f"[WAREHOUSE] 두루마리 클릭  pos={self.cfg.warehouse_scroll_click}")
-        time.sleep(self.cfg.scroll_wait)
+        self._interruptible_sleep(self.cfg.scroll_wait)
+        if not self._running:
+            return
 
         chk = self._wincap.get_screenshot()
         if self._is_dialog_open(chk):
@@ -511,7 +574,9 @@ class BotEngine:
 
         self._click_move(self.cfg.warehouse_npc_click)
         self.log(f"[WAREHOUSE] 창고 지기 클릭  pos={self.cfg.warehouse_npc_click}")
-        time.sleep(2.0)
+        self._interruptible_sleep(2.0)
+        if not self._running:
+            return
 
         for _ in range(30):
             chk = self._wincap.get_screenshot()
@@ -536,18 +601,10 @@ class BotEngine:
         key_down(self.cfg.scroll_key)
         time.sleep(0.1)
         key_up(self.cfg.scroll_key)
-        time.sleep(1.0)
-
-        for _ in range(30):
-            chk = self._wincap.get_screenshot()
-            if self._is_dialog_open(chk):
-                break
-            time.sleep(0.1)
-        time.sleep(0.3)
-
-        self._click_move(self.cfg.clan_warehouse_scroll_click)
-        self.log(f"[CLAN_WH] 두루마리 클릭  pos={self.cfg.clan_warehouse_scroll_click}")
-        time.sleep(self.cfg.scroll_wait)
+        self.log(f"[CLAN_WH] F10 두루마리 실행 → {self.cfg.scroll_wait}초 대기")
+        self._interruptible_sleep(self.cfg.scroll_wait)
+        if not self._running:
+            return
 
         chk = self._wincap.get_screenshot()
         if self._is_dialog_open(chk):
@@ -558,7 +615,9 @@ class BotEngine:
 
         self._click_move(self.cfg.clan_warehouse_npc_click)
         self.log(f"[CLAN_WH] 혈맹 창고지기 클릭  pos={self.cfg.clan_warehouse_npc_click}")
-        time.sleep(2.0)
+        self._interruptible_sleep(2.0)
+        if not self._running:
+            return
 
         for _ in range(30):
             chk = self._wincap.get_screenshot()
@@ -583,9 +642,10 @@ class BotEngine:
         self.log("[CLAN_WH] 혈맹 창고 루틴 완료")
 
     def _scroll_to_top(self, count=15):
-        """창고 아이템 목록을 맨 위로 스크롤"""
         self.log(f"    스크롤 업 {count}회 (맨 위로)")
         for _ in range(count):
+            if not self._running:
+                return
             scroll("up")
             time.sleep(0.2)
 
@@ -607,8 +667,12 @@ class BotEngine:
 
         deposited = set()
         for step in range(max_scroll_down + 1):
+            if not self._running:
+                break
             frame = self._wincap.get_screenshot()
             for tmpl, name in items:
+                if not self._running:
+                    break
                 if name in deposited:
                     continue
                 pos = self._find_item(frame, tmpl, name)
@@ -642,7 +706,7 @@ class BotEngine:
         time.sleep(0.3)
         self._click_move(self.cfg.scroll_click)
         self.log(f"[RETURN] 두루마리 클릭  pos={self.cfg.scroll_click}")
-        time.sleep(self.cfg.scroll_wait)
+        self._interruptible_sleep(self.cfg.scroll_wait)
         chk = self._wincap.get_screenshot()
         if self._is_dialog_open(chk):
             key_down("esc")
@@ -747,13 +811,27 @@ class BotEngine:
         rx = restart_loc[0] + rw // 2
         ry = restart_loc[1] + rh // 2
         sx, sy = self._wincap.get_screen_position((rx, ry))
-        move_to(sx, sy)
-        time.sleep(0.1)
-        mouse_down("left")
-        time.sleep(0.03)
-        mouse_up("left")
-        self.log(f"[DEAD] 사망 감지 → Restart 클릭  ({rx},{ry})")
-        time.sleep(5.0)
+
+        while self._running:
+            move_to(sx, sy)
+            time.sleep(0.1)
+            mouse_down("left")
+            time.sleep(0.03)
+            mouse_up("left")
+            self.log(f"[DEAD] 사망 감지 → Restart 클릭  ({rx},{ry})")
+            time.sleep(5.0)
+            chk = self._wincap.get_screenshot()
+            if chk is None:
+                continue
+            still_dead, new_loc = self._is_dead(chk)
+            if not still_dead:
+                break
+            self.log("[DEAD] Restart 버튼 아직 있음 → 재클릭")
+            rh2, rw2 = self._restart_tmpl.shape[:2]
+            rx = new_loc[0] + rw2 // 2
+            ry = new_loc[1] + rh2 // 2
+            sx, sy = self._wincap.get_screen_position((rx, ry))
+
         self.npc_pos = None
         self.log("[DEAD] 부활 완료 → 창고 루틴")
         self._run_warehouse()
@@ -840,6 +918,8 @@ class BotEngine:
         self._ocr_pause_until = 0.0
         self._set_state("PATROL")
         self.log(f"봇 시작  시작방향={DIR_NAMES[self._dir_idx]}  P=일시정지  Q=종료  F12=긴급종료")
+        self.log("3초 후 시작...")
+        self._interruptible_sleep(3.0)
 
         while self._running:
             frame = self._wincap.get_screenshot()
@@ -903,7 +983,7 @@ class BotEngine:
             self._check_hp_green_and_press(frame)
 
             # ── 무게 초과 ──
-            if self.state in ("PATROL", "FIGHTING") and self._check_weight_red(frame):
+            if self.state in ("PATROL", "FIGHTING") and self._check_weight_over(frame):
                 self._run_warehouse()
                 self.npc_pos = None
                 self._last_weight_check_t = time.time()

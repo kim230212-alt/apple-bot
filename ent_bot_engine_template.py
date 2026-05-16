@@ -63,6 +63,9 @@ DIR_NAMES = ["→", "↘", "↓", "↙", "←", "↖", "↑", "↗"]
 # 0이면 독점 없음, 비-0이면 해당 hwnd가 포커스 독점 중.
 _focus_lease_hwnd: int = 0
 
+# 듀얼 모드에서 auto_capture_devices 동시 호출 방지 락
+_device_detect_lock = threading.Lock()
+
 
 class BotEngine:
     """엔트 사냥 봇 엔진 — 템플릿 매칭 (OCR 불필요)"""
@@ -151,13 +154,33 @@ class BotEngine:
 
         kb = self.cfg.keyboard_device
         ms = self.cfg.mouse_device
-        if kb is not None and ms is not None:
-            # 양쪽 device 설정됨 → auto_capture 생략 (멀티 인스턴스 경쟁 방지)
+
+        # config에 저장된 device 번호가 이 컴퓨터에서도 유효한지 검증
+        def _kb_valid(k):
+            try:
+                return (k is not None and
+                        k < len(_icp_ctx.devices) and
+                        _icp_ctx.devices[k].handle not in (-1, 0, None))
+            except Exception:
+                return False
+
+        if kb is not None and ms is not None and _kb_valid(kb):
+            # 유효한 캐시 → auto_capture 생략 (멀티 인스턴스 경쟁 방지)
             set_devices(keyboard=kb, mouse=ms)
             self.log(f"디바이스 설정 (캐시)  KB={kb}  Mouse={ms}")
         else:
-            self.log("디바이스 감지 중... (마우스 움직여주세요)")
-            auto_capture_devices(keyboard=True, mouse=True, verbose=True)
+            if kb is not None and not _kb_valid(kb):
+                self.log(f"[WARN] KB={kb} 이 컴퓨터에서 유효하지 않음 → 재감지")
+            with _device_detect_lock:
+                # 락 획득 후 다시 확인 (다른 봇이 이미 감지해 config 저장했을 수 있음)
+                kb = self.cfg.keyboard_device
+                ms = self.cfg.mouse_device
+                if kb is not None and ms is not None and _kb_valid(kb):
+                    set_devices(keyboard=kb, mouse=ms)
+                    self.log(f"디바이스 설정 (재확인 캐시)  KB={kb}  Mouse={ms}")
+                else:
+                    self.log("디바이스 감지 중... (마우스 움직여주세요)")
+                    auto_capture_devices(keyboard=True, mouse=True, verbose=True)
             kb = self.cfg.keyboard_device
             ms = self.cfg.mouse_device
             if kb is not None or ms is not None:
