@@ -245,7 +245,9 @@ class BotEngine:
 
         idx = getattr(self.cfg, "window_index", 0)
         self._wincap = WindowCapture(self.cfg.window_title, window_index=idx)
-        self.log(f"창 감지 완료  ({self._wincap.offset_x}, {self._wincap.offset_y})")
+        self.log(f"창 감지 완료  ({self._wincap.offset_x}, {self._wincap.offset_y})  크기={self._wincap.w}x{self._wincap.h}")
+        if self._wincap.w == 0 or self._wincap.h == 0:
+            raise RuntimeError(f"[오류] 게임 창 크기가 0입니다 (최소화 상태이거나 window_index={idx}에 해당하는 창이 없음). 게임 창을 화면에 띄워주세요.")
 
         # 게임 창 포커스 + 마우스 중앙으로 이동
         try:

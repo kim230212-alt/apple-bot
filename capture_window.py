@@ -184,6 +184,8 @@ class WindowCapture:
                 return frame
 
         # fallback: BitBlt
+        if self.w == 0 or self.h == 0:
+            return None
         wDC = win32gui.GetWindowDC(self.hwnd)
         dcObj = win32ui.CreateDCFromHandle(wDC)
         cDC = dcObj.CreateCompatibleDC()
