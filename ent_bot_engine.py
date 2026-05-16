@@ -111,25 +111,27 @@ class BotEngine:
         kb = self.cfg.keyboard_device
         ms = self.cfg.mouse_device
 
-        def _kb_valid(k):
+        def _dev_valid(n):
             try:
                 from interception.inputs import _g_context as _icp_ctx
-                return (k is not None and
-                        k < len(_icp_ctx.devices) and
-                        _icp_ctx.devices[k].handle not in (-1, 0, None))
+                return (n is not None and
+                        n < len(_icp_ctx.devices) and
+                        _icp_ctx.devices[n].handle not in (-1, 0, None))
             except Exception:
                 return False
 
-        if kb is not None and ms is not None and _kb_valid(kb):
+        if kb is not None and ms is not None and _dev_valid(kb) and _dev_valid(ms):
             set_devices(keyboard=kb, mouse=ms)
             self.log(f"디바이스 설정 (캐시)  KB={kb}  Mouse={ms}")
         else:
-            if kb is not None and not _kb_valid(kb):
+            if kb is not None and not _dev_valid(kb):
                 self.log(f"[WARN] KB={kb} 이 컴퓨터에서 유효하지 않음 → 재감지")
+            if ms is not None and not _dev_valid(ms):
+                self.log(f"[WARN] Mouse={ms} 이 컴퓨터에서 유효하지 않음 → 재감지")
             with _device_detect_lock:
                 kb = self.cfg.keyboard_device
                 ms = self.cfg.mouse_device
-                if kb is not None and ms is not None and _kb_valid(kb):
+                if kb is not None and ms is not None and _dev_valid(kb) and _dev_valid(ms):
                     set_devices(keyboard=kb, mouse=ms)
                     self.log(f"디바이스 설정 (재확인 캐시)  KB={kb}  Mouse={ms}")
                 else:
