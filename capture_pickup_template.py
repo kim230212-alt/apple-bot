@@ -91,7 +91,41 @@ def main():
     print("  F12 : 종료\n")
     print("사용법: 게임에서 아이템 드롭 → 텍스트 위 커서 → F5\n")
 
+    PREVIEW_SCALE = 6   # 실시간 미리보기 확대 배율
+    last_preview_t = 0
+
     while not req["quit"]:
+        # ── 실시간 커서 위치 미리보기 ──
+        now = time.time()
+        if now - last_preview_t > 0.1:   # 10fps
+            last_preview_t = now
+            try:
+                pt  = win32gui.GetCursorPos()
+                pcx = pt[0] - wincap.offset_x
+                pcy = pt[1] - wincap.offset_y
+                pframe = wincap.get_screenshot()
+                if pframe is not None:
+                    if pframe.ndim == 3 and pframe.shape[2] == 4:
+                        pframe = cv2.cvtColor(pframe, cv2.COLOR_BGRA2BGR)
+                    cw, ch = size["w"], size["h"]
+                    px1 = max(0, pcx - cw // 2)
+                    py1 = max(0, pcy - ch // 2)
+                    px2 = min(pframe.shape[1], px1 + cw)
+                    py2 = min(pframe.shape[0], py1 + ch)
+                    pcrop = pframe[py1:py2, px1:px2]
+                    if pcrop.size > 0:
+                        pview = cv2.resize(pcrop,
+                                           (pcrop.shape[1] * PREVIEW_SCALE,
+                                            pcrop.shape[0] * PREVIEW_SCALE),
+                                           interpolation=cv2.INTER_NEAREST)
+                        cv2.putText(pview, f"F5=저장  {cw}x{ch}  +/-조절",
+                                    (4, pview.shape[0] - 4),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 100), 1)
+                        cv2.imshow("실시간 미리보기", pview)
+                        cv2.waitKey(1)
+            except Exception:
+                pass
+
         if req["cap"]:
             req["cap"] = False
             try:
