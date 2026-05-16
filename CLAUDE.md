@@ -139,6 +139,35 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - **`_scroll_return()`**: `_do_f9_return()` + `_f11_to_zone()` 조합으로 단순화 (순환 없음)
 - 사망(`_handle_death`) / 부활 실패(`_handle_revive_fail`) 모두 `_f11_to_zone()` 호출이므로 자동 적용
 
+### 2026-05-17 작업
+
+#### 듀얼 모드 키보드 device 유효성 검증
+- **문제**: config에 저장된 `keyboard_device=0`이 다른 컴퓨터에서 다른 장치 번호일 수 있음
+  - 단일 봇은 동작하는데 듀얼 실행 시 키보드 안 되는 현상 (일부 PC)
+- **수정** (`ent_bot_engine_template.py`, `ent_bot_engine.py` 양쪽):
+  - `_kb_valid(k)`: device handle 유효성 검사 함수 추가
+  - `initialize()`: 캐시된 KB device가 유효하면 그대로 사용, 유효하지 않으면 `_device_detect_lock` 잡고 `auto_capture_devices` 재감지
+  - 재감지 후 config에 저장 → 다음 실행부터 올바른 번호 사용
+- **`_device_detect_lock`**: 모듈 레벨 `threading.Lock()` — 듀얼 모드에서 두 봇이 동시에 auto_capture 호출하는 race condition 방지
+
+#### 픽업 템플릿 캡처 툴 범용화 (`capture_pickup_template.py`)
+- 기존: 미스릴/버섯포자 2종 고정 (F5/F6)
+- 변경: 아이템 종류 제한 없이 **F5 → pickup_NNN.png 자동 번호 저장**
+- 저장 후 콘솔에 이름 입력 → `templates/pickup_labels.txt` 기록
+- `+`/`-` 키로 캡처 너비 실시간 조절 (기본 80×18px)
+- **실시간 미리보기 창**: 커서 위치 ROI를 6배 확대로 10fps 표시 → 텍스트 잘림 전에 확인 가능
+- F9 매칭 테스트 + 결과 오버레이 이미지 표시
+
+#### 픽업 anchor 슬라이딩 시각화 테스트 (`test_pickup_anchor.py`)
+- **문제**: 픽업 주우러 가다가 캐릭터가 우회하는 현상
+  - 원인: 슬라이딩 anchor — 캐릭터 이동 시 카메라 따라 이동 → 아이템 화면 좌표 변화 → anchor 업데이트 → 매 클릭마다 방향 재조정 → 직선이 아닌 우회 경로
+- **테스트 스크립트**: 실제 클릭 없이 시각화만
+  - 노란선: anchor 이동 경로
+  - 초록 박스: stick_radius 내 유효 감지
+  - 빨간 박스: radius 밖 무효 감지 (miss 카운트)
+  - 파란 원: 현재 anchor + stick_radius 범위
+  - `q`=종료, `s`=스냅샷, `c`=경로 초기화
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘
