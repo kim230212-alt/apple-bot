@@ -29,8 +29,8 @@ TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 DEBUG_DIR    = os.path.join(BASE_DIR, "debug_pickup_template")
 CONFIG_PATH  = os.path.join(BASE_DIR, "ent_config.json")
 
-CAPTURE_W       = 50
-CAPTURE_H       = 15
+CAPTURE_W       = 80
+CAPTURE_H       = 18
 MATCH_THRESHOLD = 0.72
 NMS_RADIUS      = 20
 
@@ -73,15 +73,20 @@ def main():
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
     os.makedirs(DEBUG_DIR, exist_ok=True)
 
-    req = {"cap": False, "match": False, "quit": False}
+    req  = {"cap": False, "match": False, "quit": False}
+    size = {"w": CAPTURE_W, "h": CAPTURE_H}
 
     kb_module.add_hotkey("f5",  lambda: req.update(cap=True))
     kb_module.add_hotkey("f9",  lambda: req.update(match=True))
     kb_module.add_hotkey("f12", lambda: req.update(quit=True))
+    kb_module.add_hotkey("+",   lambda: (size.update(w=size["w"] + 5),
+                                         print(f"  [크기] {size['w']}x{size['h']}")))
+    kb_module.add_hotkey("-",   lambda: (size.update(w=max(20, size["w"] - 5)),
+                                         print(f"  [크기] {size['w']}x{size['h']}")))
 
     print("\n=== 조작 ===")
     print("  F5  : 커서 위치 캡처 → pickup_NNN.png 저장")
-    print(f"        캡처 크기: {CAPTURE_W}x{CAPTURE_H}")
+    print(f"        캡처 크기: {size['w']}x{size['h']}  (+/- 로 너비 조절)")
     print("  F9  : 저장된 템플릿 전체 매칭 테스트")
     print("  F12 : 종료\n")
     print("사용법: 게임에서 아이템 드롭 → 텍스트 위 커서 → F5\n")
@@ -100,10 +105,11 @@ def main():
                 if frame.ndim == 3 and frame.shape[2] == 4:
                     frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
 
-                x1 = max(0, cx - CAPTURE_W // 2)
-                y1 = max(0, cy - CAPTURE_H // 2)
-                x2 = min(frame.shape[1], x1 + CAPTURE_W)
-                y2 = min(frame.shape[0], y1 + CAPTURE_H)
+                cw, ch = size["w"], size["h"]
+                x1 = max(0, cx - cw // 2)
+                y1 = max(0, cy - ch // 2)
+                x2 = min(frame.shape[1], x1 + cw)
+                y2 = min(frame.shape[0], y1 + ch)
                 crop  = frame[y1:y2, x1:x2]
                 idx   = next_pickup_idx()
                 fname = os.path.join(TEMPLATE_DIR, f"pickup_{idx:03d}.png")
