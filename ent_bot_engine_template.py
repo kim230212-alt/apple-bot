@@ -519,35 +519,21 @@ class BotEngine:
         초기 좌표 기준 stick_radius 내 재탐지만 '타겟 존재'로 간주 (드리프트 방지).
         anchor 지속: 직전 세션 종료 후 anchor_reuse_window 초 내 + anchor_reuse_dist 이내면
         직전 anchor 재사용 → 클러스터 픽업 시 캐릭터 왔다갔다 방지."""
-        now0 = time.time()
-        if (self._last_pickup_anchor is not None
-                and now0 - self._last_pickup_anchor_t < anchor_reuse_window):
-            lx, ly = self._last_pickup_anchor
-            ix0, iy0 = initial_pos
-            if (lx - ix0) ** 2 + (ly - iy0) ** 2 <= anchor_reuse_dist * anchor_reuse_dist:
-                self.log(f"[PICKUP] anchor 재사용 {initial_pos} → {self._last_pickup_anchor}")
-                initial_pos = self._last_pickup_anchor
-        self.log(f"[PICKUP] 연속 줍기 시작 → {self._last_pickup_name} pos={initial_pos}")
-        self._pickup_release()   # 혹시 유지 중인 LMB 해제
+        self.log(f"[PICKUP] 줍기 시작 → {self._last_pickup_name} pos={initial_pos}")
+        self._pickup_release()
+
+        # 감지 위치로 커서 이동 + LMB 홀드
+        self._pickup_click_hold(initial_pos)
+
         t0 = time.time()
         miss = 0
-        click_count = 0
-        r2 = stick_radius * stick_radius
-        ix, iy = initial_pos
-        sx, sy = self._wincap.get_screen_position(initial_pos)
+
         while self._running and time.time() - t0 < max_duration:
-            with _ilock():
-                self._ensure_focus()
-                move_to(sx, sy)
-                time.sleep(0.04)
-                mouse_down("left")
-                time.sleep(0.03)
-                mouse_up("left")
-            click_count += 1
-            time.sleep(0.15)
+            time.sleep(0.25)
             frame = self._wincap.get_screenshot()
             if frame is not None:
                 if self._check_restart(frame):
+                    self._pickup_release()
                     return
                 self._push_scan_frame(frame)
             time.sleep(0.1)
@@ -555,20 +541,12 @@ class BotEngine:
             if pickup_new is None:
                 miss += 1
             else:
-                dx = pickup_new[0] - ix
-                dy = pickup_new[1] - iy
-                if dx * dx + dy * dy <= r2:
-                    miss = 0
-                    # 슬라이딩 anchor: 같은 아이템이 카메라 이동으로 화면에서 흐를 때 추적
-                    ix, iy = pickup_new
-                    sx, sy = self._wincap.get_screen_position(pickup_new)
-                else:
-                    miss += 1
+                miss = 0
             if miss >= miss_confirm:
                 break
-        self._last_pickup_anchor = (ix, iy)
-        self._last_pickup_anchor_t = time.time()
-        self.log(f"[PICKUP] 연속 줍기 종료  클릭={click_count}회  경과={time.time()-t0:.1f}s")
+
+        self._pickup_release()
+        self.log(f"[PICKUP] 줍기 종료  경과={time.time()-t0:.1f}s")
 
     def _ctrl_drag_attack(self, win_pos):
         self._pickup_release()  # 줍기 LMB 유지 중이면 안전 해제
@@ -1404,8 +1382,8 @@ class BotEngine:
                     npc_chk, pickup_chk = self._find_npc()
                     if pickup_chk is not None:
                         self.log(f"[PICKUP] {self._last_pickup_name} 발견! 줍기  pos={pickup_chk}")
-                        self._click_move(pickup_chk)
-                        time.sleep(1.0)
+                        self._run_pickup_until_gone(pickup_chk)
+                        return
                     if npc_chk is not None:
                         self.npc_pos = npc_chk
                         self._last_npc_seen_t = time.time()
