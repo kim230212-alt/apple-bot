@@ -38,7 +38,7 @@ def _force_foreground(hwnd: int) -> None:
             return
     user32.SetForegroundWindow(hwnd)
 
-from template_scanner import template_process_fn
+from template_scanner import template_process_fn, PICKUP_THRESHOLD, PICKUP_THRESHOLDS
 
 from ent_bot_config import BotConfig
 from capture_window import WindowCapture
@@ -116,6 +116,7 @@ class BotEngine:
         self._last_pickup_score = 0.0
         self._last_pickup_anchor = None    # 직전 세션 anchor (window coord)
         self._last_pickup_anchor_t = 0.0   # 직전 anchor 종료 시각
+        self._pickup_tmpls: list = []       # 인라인 픽업 감지용 템플릿 (name, gray)
 
         # ── 스캐너 프로세스 (GIL 회피) ──
         self._scan_proc: Optional[mp.Process] = None
@@ -311,6 +312,15 @@ class BotEngine:
         self._bark_tmpl = _load("ent_bark.png", required=False)
         self._chat_atk_tmpl = _load("chat_attack.png")
         self._chat_revive_tmpl = _load("chat_revive.png", required=False)
+
+        # 픽업 인라인 매칭용 (subprocess 불필요, 항상 신선한 좌표)
+        self._pickup_tmpls = []
+        for f in sorted(glob.glob(os.path.join(BASE_DIR, "templates", "pickup_*.png"))):
+            img = cv2.imread(f, cv2.IMREAD_COLOR)
+            if img is not None:
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                self._pickup_tmpls.append((os.path.basename(f), gray))
+        self.log(f"  픽업 인라인 템플릿: {len(self._pickup_tmpls)}개")
 
     # ──────────────────────────────────────────
     # 제어
@@ -512,38 +522,61 @@ class BotEngine:
             time.sleep(0.3)
         self.log(f"[경고] {key} 입력 실패 — 포커스 미확립 (max_wait={max_wait:.0f}s)")
 
-    def _run_pickup_until_gone(self, initial_pos, max_duration=15.0,
-                               miss_confirm=4, stick_radius=100,
-                               anchor_reuse_dist=180, anchor_reuse_window=3.0):
-        """픽업 대상이 사라질 때까지 반복 클릭 + 재스캔.
-        초기 좌표 기준 stick_radius 내 재탐지만 '타겟 존재'로 간주 (드리프트 방지).
-        anchor 지속: 직전 세션 종료 후 anchor_reuse_window 초 내 + anchor_reuse_dist 이내면
-        직전 anchor 재사용 → 클러스터 픽업 시 캐릭터 왔다갔다 방지."""
+    def _find_pickup_inline(self, frame):
+        """현재 프레임에서 직접 pickup_*.png 매칭 — subprocess 없이 신선한 좌표 반환.
+        test_pickup_pos.py 와 동일 로직."""
+        if not self._pickup_tmpls:
+            return None
+        if frame.ndim == 3 and frame.shape[2] == 4:
+            frame = cv2.cvtColor(frame, cv2.COLOR_BGRA2BGR)
+        sx1, sy1, sx2, sy2 = tuple(self.cfg.ocr_scan_rect)
+        roi = frame[sy1:sy2, sx1:sx2]
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        best = None
+        for name, tg in self._pickup_tmpls:
+            th, tw = tg.shape[:2]
+            if gray.shape[0] < th or gray.shape[1] < tw:
+                continue
+            res = cv2.matchTemplate(gray, tg, cv2.TM_CCOEFF_NORMED)
+            _, score, _, loc = cv2.minMaxLoc(res)
+            thr = PICKUP_THRESHOLDS.get(name, PICKUP_THRESHOLD)
+            if score >= thr:
+                cx = loc[0] + tw // 2 + sx1
+                cy = loc[1] + th // 2 + sy1
+                if cx >= 300 and (best is None or score > best[1]):
+                    best = (name, score, cx, cy)
+        return best
+
+    def _run_pickup_until_gone(self, initial_pos, max_duration=15.0, miss_confirm=4):
+        """픽업 대상이 사라질 때까지 인라인 매칭으로 커서 추적 + LMB 유지.
+        매 루프마다 신선한 프레임에서 직접 매칭 → 스캐너 지연 없이 정확한 좌표."""
         self.log(f"[PICKUP] 줍기 시작 → {self._last_pickup_name} pos={initial_pos}")
         self._pickup_release()
-
-        # 감지 위치로 커서 이동 + LMB 홀드
-        self._pickup_click_hold(initial_pos)
-
         t0 = time.time()
         miss = 0
 
         while self._running and time.time() - t0 < max_duration:
-            time.sleep(0.25)
             frame = self._wincap.get_screenshot()
-            if frame is not None:
-                if self._check_restart(frame):
-                    self._pickup_release()
-                    return
-                self._push_scan_frame(frame)
-            time.sleep(0.1)
-            _, pickup_new = self._find_npc()
-            if pickup_new is None:
-                miss += 1
-            else:
+            if frame is None:
+                time.sleep(0.1)
+                continue
+            if self._check_restart(frame):
+                self._pickup_release()
+                return
+            self._push_scan_frame(frame)
+
+            result = self._find_pickup_inline(frame)
+            if result is not None:
+                name, score, cx, cy = result
+                self._last_pickup_name = name
+                self._last_pickup_score = score
+                self._pickup_click_hold((cx, cy))
                 miss = 0
-            if miss >= miss_confirm:
-                break
+            else:
+                miss += 1
+                if miss >= miss_confirm:
+                    break
+            time.sleep(0.25)
 
         self._pickup_release()
         self.log(f"[PICKUP] 줍기 종료  경과={time.time()-t0:.1f}s")
