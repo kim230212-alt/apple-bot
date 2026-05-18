@@ -548,9 +548,10 @@ class BotEngine:
         return best
 
     def _run_pickup_until_gone(self, initial_pos, max_duration=15.0, miss_confirm=4):
-        """픽업 대상이 사라질 때까지 인라인 매칭으로 커서 추적 + LMB 유지.
-        매 루프마다 신선한 프레임에서 직접 매칭 → 스캐너 지연 없이 정확한 좌표."""
-        self.log(f"[PICKUP] 줍기 시작 → {self._last_pickup_name} pos={initial_pos}")
+        """test_pickup_pos.py 로직 그대로:
+        감지 시 → move_to + LMB 홀드(처음 한 번만 mouse_down)
+        미감지 시 → miss 카운트, miss_confirm 도달 시 LMB 해제 후 종료"""
+        self.log(f"[PICKUP] 연속 줍기 시작 → pos={initial_pos}")
         self._pickup_release()
         t0 = time.time()
         miss = 0
@@ -570,16 +571,21 @@ class BotEngine:
                 name, score, cx, cy = result
                 self._last_pickup_name = name
                 self._last_pickup_score = score
-                self._pickup_click_hold((cx, cy))
+                sx, sy = self._wincap.get_screen_position((cx, cy))
+                move_to(sx, sy)
+                if not self._pickup_lmb_held:
+                    mouse_down("left")
+                    self._pickup_lmb_held = True
                 miss = 0
             else:
                 miss += 1
                 if miss >= miss_confirm:
                     break
-            time.sleep(0.25)
+
+            time.sleep(0.3)
 
         self._pickup_release()
-        self.log(f"[PICKUP] 줍기 종료  경과={time.time()-t0:.1f}s")
+        self.log(f"[PICKUP] 연속 줍기 종료  경과={time.time()-t0:.1f}s")
 
     def _ctrl_drag_attack(self, win_pos):
         self._pickup_release()  # 줍기 LMB 유지 중이면 안전 해제
