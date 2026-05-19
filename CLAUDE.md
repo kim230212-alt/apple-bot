@@ -168,6 +168,33 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
   - 파란 원: 현재 anchor + stick_radius 범위
   - `q`=종료, `s`=스냅샷, `c`=경로 초기화
 
+### 2026-05-19 작업
+
+#### 픽업 템플릿 이진화 (배경 제거, 흰 글씨만 매칭)
+- **문제**: 배경(잔디/흙/돌) 종류에 따라 매칭 점수가 달라지고 다른 아이템에 오매칭
+- **해결**: `BINARY_THRESHOLD = 128` 추가 — 픽업 템플릿/프레임 모두 이진화 후 매칭
+  - `template_scanner.py`, `ent_bot_engine_template.py`, `test_pickup_pos.py`, `capture_pickup_template.py` 동시 적용
+  - 이진화 후 pickup_019(미스릴) score 0.762 → 0.994로 향상
+
+#### 추가 NPC (판) 오매칭 수정 (`template_scanner.py`)
+- `EXTRA_NPC_THRESHOLD = 0.80` 별도 추가 (기존 NPC_THRESHOLD 0.70 공유 → 오매칭)
+- `extra_npc_score` 결과에 포함 → 엔진 로그에 score 표시
+
+#### 픽업 반복 클릭 방식으로 전환
+- **문제**: LMB 홀드 상태에서 `move_to` 호출 = 드래그 동작 → 픽업 안 됨
+- **수정**: `_run_pickup_until_gone` (`ent_bot_engine_template.py`) + `test_pickup_pos.py`
+  - 감지 시마다 `mouse_down` + `mouse_up` 즉시 클릭으로 교체
+
+#### 픽업 캡처 툴 박스 선택 방식으로 변경 (`capture_pickup_template.py`)
+- 기존: 커서 위치 중심 고정 크기(80×18px) 캡처
+- 변경: F5 → `cv2.selectROI` 드래그 박스 선택 → Enter 저장
+- F9 매칭 테스트에 `ocr_scan_rect` ROI 적용 (엔진과 동일 범위)
+- 템플릿별 임계값(`MATCH_THRESHOLDS`), NMS 반경 50, [미달] 점수 출력 추가
+
+#### 픽업 템플릿 정리
+- `pickup_001~004` 삭제 — 마우스 호버 상태(노란 텍스트)로 캡처된 구버전
+- `pickup_005~019` 유지 — 흰색 텍스트로 재캡처
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘
