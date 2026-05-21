@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 import sys
+import subprocess
 import threading
 import tkinter as tk
 from tkinter import ttk, scrolledtext
@@ -141,8 +142,15 @@ class BotGUI:
         clan_wh_var = tk.BooleanVar(value=self.config.use_clan_warehouse)
         self._check_vars["use_clan_warehouse"] = clan_wh_var
         clan_wh_check = ttk.Checkbutton(inner, text="혈맹 창고 사용", variable=clan_wh_var,
-                                         command=self._on_clan_warehouse_toggle)
+                                         command=self._on_checkbox_toggle)
         clan_wh_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(4, 2))
+        row += 1
+
+        personal_wh_var = tk.BooleanVar(value=self.config.use_personal_warehouse)
+        self._check_vars["use_personal_warehouse"] = personal_wh_var
+        personal_wh_check = ttk.Checkbutton(inner, text="일반 창고 사용", variable=personal_wh_var,
+                                             command=self._on_checkbox_toggle)
+        personal_wh_check.grid(row=row, column=0, columnspan=2, sticky="w", padx=4, pady=(2, 2))
         row += 1
 
         patrol_rand_var = tk.BooleanVar(value=self.config.patrol_random)
@@ -233,6 +241,7 @@ class BotGUI:
         btn_frame = ttk.Frame(inner)
         btn_frame.grid(row=row, column=0, columnspan=2, pady=8)
         ttk.Button(btn_frame, text="적용 & 저장", command=self._apply_settings).pack(fill="x")
+        ttk.Button(btn_frame, text="디바이스 확인/저장", command=self._on_kb_test).pack(fill="x", pady=(4, 0))
 
     def _build_log(self):
         lf = ttk.LabelFrame(self.root, text="로그")
@@ -360,6 +369,30 @@ class BotGUI:
         self.config.save(CONFIG_PATH)
         enabled = [i["name"] for i, v in self._deposit_item_vars if v.get()]
         self._append_log(f"[설정] 맡길 아이템: {', '.join(enabled) if enabled else '(없음)'}")
+
+    def _on_kb_test(self):
+        self._append_log("[디바이스] keyboard_mouse_check.py 실행 중...")
+        cwd = os.path.dirname(os.path.abspath(__file__))
+
+        def worker():
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, "-X", "utf8", "keyboard_mouse_check.py"],
+                    cwd=cwd, creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+                proc.wait()
+                self.config.load(self.config._path)
+                kb = self.config.keyboard_device
+                ms = self.config.mouse_device
+                if "keyboard_device" in self._setting_vars:
+                    self.after(0, lambda: self._setting_vars["keyboard_device"].set(str(kb)))
+                if "mouse_device" in self._setting_vars:
+                    self.after(0, lambda: self._setting_vars["mouse_device"].set(str(ms)))
+                self.after(0, self._append_log, f"[디바이스] 갱신  KB={kb}  MS={ms}")
+            except Exception as e:
+                self.after(0, self._append_log, f"[디바이스] 오류: {e}")
+
+        threading.Thread(target=worker, daemon=True).start()
 
     # ──────────────────────────────────────────
     # 설정 적용

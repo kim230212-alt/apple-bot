@@ -5,8 +5,8 @@
     1609,
     767
   ],
-  "keyboard_device": 0,
-  "mouse_device": 13,
+  "keyboard_device": 2,
+  "mouse_device": 10,
   "ocr_interval": 0.5,
   "patrol_dist": 500,
   "patrol_dist_up": 200,
@@ -79,16 +79,16 @@
     342
   ],
   "warehouse_deposit_click": [
-    92,
-    165
+    82,
+    230
   ],
   "warehouse_ok_click": [
     288,
     555
   ],
   "warehouse_scroll_click": [
-    57,
-    122
+    82,
+    120
   ],
   "warehouse_item_threshold": 0.7,
   "deposit_items": [
@@ -121,7 +121,8 @@
       "enabled": true
     }
   ],
-  "use_clan_warehouse": true,
+  "use_clan_warehouse": false,
+  "use_personal_warehouse": true,
   "clan_warehouse_scroll_click": [
     60,
     121
@@ -143,6 +144,6 @@
   "stuck_check_interval": 60.0,
   "stuck_no_move_max": 8,
   "window_index": 0,
-  "extra_npc_enabled": true,
+  "extra_npc_enabled": false,
   "extra_npc_name": "판"
 }

@@ -130,6 +130,8 @@ class BotEngine:
         self._close_tmpl = None
         self._restart_tmpl = None
         self._zone_tmpl = None
+        self._warehouse_keeper_tmpl = None  # 창고지기 NPC (그레이스케일 fallback)
+        self._keeper_name_tmpl = None       # 창고지기 NPC (컬러, 우선)
         self._pan_mane_tmpl = None
         self._fruit_tmpl = None
         self._stem_tmpl = None
@@ -303,6 +305,14 @@ class BotEngine:
         self._close_tmpl = _load("close_btn.png")
         self._restart_tmpl = _load("restart_btn.png")
         self._zone_tmpl = _load("zone_fairy_forest.png", required=False)
+
+        def _load_gray(name):
+            t = _load(name, required=False)
+            return cv2.cvtColor(t, cv2.COLOR_BGR2GRAY) if t is not None else None
+
+        self._warehouse_keeper_tmpl = _load_gray("warehouse_keeper.png")
+        _kn_path = os.path.join(BASE_DIR, "templates", "keeper_name.png")
+        self._keeper_name_tmpl = _load("keeper_name.png", required=False) if os.path.exists(_kn_path) else None
         self._pan_mane_tmpl = _load("ent_pan_mane.png", required=False)
         self._fruit_tmpl = _load("ent_fruit.png")
         self._stem_tmpl = _load("ent_stem.png")
@@ -407,6 +417,51 @@ class BotEngine:
         self.state = s
         self._state_enter_t = time.time()
         self.log(f"[STATE] → {s}")
+
+    def _click_warehouse_npc(self, tmpl_gray, fixed_pos, offset_y=40, label="창고지기"):
+        """shop_bot 방식 창고지기 NPC 클릭.
+        keeper_name.png(컬러, thr=0.75) 우선, 없으면 grayscale(thr=0.45) fallback."""
+        # 마우스 대피 후 캡처 (커서가 NPC 위에 있으면 score 급락)
+        safe = self.cfg.player_pos
+        sx, sy = self._wincap.get_screen_position(safe)
+        with _ilock():
+            self._ensure_focus()
+            move_to(sx, sy)
+        time.sleep(0.2)
+
+        frame = self._wincap.get_screenshot()
+        if frame is None:
+            self.log(f"[WH] {label} 캡처 실패 → 고정 좌표")
+            self._click_move(fixed_pos)
+            return
+
+        # shop_bot과 동일: 컬러 템플릿 우선, 없으면 grayscale
+        if self._keeper_name_tmpl is not None:
+            src = frame
+            cmp = self._keeper_name_tmpl
+            thr = 0.75
+        elif tmpl_gray is not None:
+            src = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            cmp = tmpl_gray
+            thr = 0.45
+        else:
+            self.log(f"[WH] {label} 템플릿 없음 → 고정 좌표")
+            self._click_move(fixed_pos)
+            return
+
+        th, tw = cmp.shape[:2]
+        res = cv2.matchTemplate(src, cmp, cv2.TM_CCOEFF_NORMED)
+        _, score, _, max_loc = cv2.minMaxLoc(res)
+
+        if score < thr:
+            self.log(f"[WH] {label} 매칭 실패 score={score:.3f} (thr={thr}) → 고정 좌표")
+            self._click_move(fixed_pos)
+            return
+
+        cx = max_loc[0] + tw // 2
+        cy = max_loc[1] + th // 2 + offset_y
+        self.log(f"[WH] {label} 매칭 score={score:.3f} → 클릭 ({cx},{cy})")
+        self._click_move((cx, cy))
 
     def _click_move(self, win_pos):
         self._pickup_release()  # 줍기 LMB 유지 중이면 안전 해제
@@ -775,15 +830,39 @@ class BotEngine:
     def _run_warehouse(self):
         self._acquire_focus_lease()
         try:
-            if self.cfg.use_clan_warehouse:
-                self._run_clan_warehouse()
+            use_clan     = self.cfg.use_clan_warehouse
+            use_personal = self.cfg.use_personal_warehouse
+            if not use_clan and not use_personal:
+                return
+
+            self.log("[WH] 창고 루틴 시작")
+            if not self._wh_open_and_teleport():
+                return
+
+            if use_clan:
+                if not self._wh_open_npc_dialog():
+                    return
+                self._wh_deposit(self.cfg.clan_warehouse_deposit_click,
+                                 self.cfg.clan_warehouse_ok_click, "혈맹")
+                if use_personal and self._running:
+                    self._ikey("esc")
+                    time.sleep(0.5)
+                    if self._wh_open_npc_dialog():
+                        self._wh_deposit(self.cfg.warehouse_deposit_click,
+                                         self.cfg.warehouse_ok_click, "개인")
             else:
-                self._run_personal_warehouse()
+                if not self._wh_open_npc_dialog():
+                    return
+                self._wh_deposit(self.cfg.warehouse_deposit_click,
+                                 self.cfg.warehouse_ok_click, "개인")
+
+            self._scroll_return()
+            self.log("[WH] 창고 루틴 완료")
         finally:
             self._release_focus_lease()
 
-    def _run_personal_warehouse(self):
-        self.log("[WAREHOUSE] 개인 창고 루틴 시작")
+    def _wh_open_and_teleport(self) -> bool:
+        """F10 → 두루마리 창고지기 클릭 → 텔레포트 대기."""
         self._ikey(self.cfg.scroll_key)
         time.sleep(1.0)
 
@@ -794,22 +873,26 @@ class BotEngine:
             time.sleep(0.1)
         time.sleep(0.3)
 
-        self._click_move(self.cfg.warehouse_scroll_click)
-        self.log(f"[WAREHOUSE] 두루마리 클릭  pos={self.cfg.warehouse_scroll_click}")
+        pos = self.cfg.warehouse_scroll_click
+        self._click_move(pos)
+        self.log(f"[WH] 두루마리 창고지기 클릭  pos={pos} → 이동 대기 {self.cfg.scroll_wait}s")
         self._interruptible_sleep(self.cfg.scroll_wait)
         if not self._running:
-            return
+            return False
 
         chk = self._wincap.get_screenshot()
         if self._is_dialog_open(chk):
             self._ikey("esc")
             time.sleep(0.5)
+        return True
 
-        self._click_move(self.cfg.warehouse_npc_click)
-        self.log(f"[WAREHOUSE] 창고 지기 클릭  pos={self.cfg.warehouse_npc_click}")
+    def _wh_open_npc_dialog(self) -> bool:
+        """창고지기 NPC 클릭 후 대화창 열림 대기."""
+        self._click_warehouse_npc(self._warehouse_keeper_tmpl, self.cfg.warehouse_npc_click,
+                                  label="창고지기")
         self._interruptible_sleep(2.0)
         if not self._running:
-            return
+            return False
 
         for _ in range(30):
             chk = self._wincap.get_screenshot()
@@ -817,67 +900,17 @@ class BotEngine:
                 break
             time.sleep(0.1)
         time.sleep(0.3)
+        return True
 
-        self._click_move(self.cfg.warehouse_deposit_click)
-        self.log(f"[WAREHOUSE] 물건을 맡긴다  pos={self.cfg.warehouse_deposit_click}")
+    def _wh_deposit(self, deposit_click, ok_click, label: str):
+        """'물건을 맡긴다' 메뉴 클릭 → 아이템 맡기기 → OK."""
+        self._click_move(deposit_click)
+        self.log(f"[WH] {label} 물건을 맡긴다  pos={deposit_click}")
         time.sleep(1.0)
-
         self._deposit_items()
-
-        self._click_move(self.cfg.warehouse_ok_click)
-        self.log(f"[WAREHOUSE] OK 클릭  pos={self.cfg.warehouse_ok_click}")
+        self._click_move(ok_click)
+        self.log(f"[WH] {label} OK 클릭  pos={ok_click}")
         time.sleep(1.0)
-        self.log("[WAREHOUSE] 개인 창고 루틴 완료")
-
-    def _run_clan_warehouse(self):
-        self.log("[CLAN_WH] 혈맹 창고 루틴 시작")
-        self._ikey(self.cfg.scroll_key)
-        time.sleep(1.0)
-
-        for _ in range(30):
-            chk = self._wincap.get_screenshot()
-            if self._is_dialog_open(chk):
-                break
-            time.sleep(0.1)
-        time.sleep(0.3)
-
-        self._click_move(self.cfg.clan_warehouse_scroll_click)
-        self.log(f"[CLAN_WH] 두루마리 클릭  pos={self.cfg.clan_warehouse_scroll_click}")
-        self.log(f"[CLAN_WH] 이동 대기 → {self.cfg.scroll_wait}초")
-        self._interruptible_sleep(self.cfg.scroll_wait)
-        if not self._running:
-            return
-
-        chk = self._wincap.get_screenshot()
-        if self._is_dialog_open(chk):
-            self._ikey("esc")
-            time.sleep(0.5)
-
-        self._click_move(self.cfg.clan_warehouse_npc_click)
-        self.log(f"[CLAN_WH] 혈맹 창고지기 클릭  pos={self.cfg.clan_warehouse_npc_click}")
-        self._interruptible_sleep(2.0)
-        if not self._running:
-            return
-
-        for _ in range(30):
-            chk = self._wincap.get_screenshot()
-            if self._is_dialog_open(chk):
-                break
-            time.sleep(0.1)
-        time.sleep(0.3)
-
-        self._click_move(self.cfg.clan_warehouse_deposit_click)
-        self.log(f"[CLAN_WH] 물건을 맡긴다  pos={self.cfg.clan_warehouse_deposit_click}")
-        time.sleep(1.0)
-
-        self._deposit_items()
-
-        self._click_move(self.cfg.clan_warehouse_ok_click)
-        self.log(f"[CLAN_WH] OK 클릭  pos={self.cfg.clan_warehouse_ok_click}")
-        time.sleep(1.0)
-
-        self._scroll_return()
-        self.log("[CLAN_WH] 혈맹 창고 루틴 완료")
 
     def _scroll_to_top(self, count=15):
         self.log(f"    스크롤 업 {count}회 (맨 위로)")
@@ -1098,8 +1131,11 @@ class BotEngine:
         sx, sy = self._wincap.get_screen_position((rx, ry))
 
         while self._running:
+            self._wait_for_lease()
             with _ilock():
-                self._ensure_focus()
+                if not self._ensure_focus():
+                    self.log("[DEAD] 포커스 전환 실패 → 재시도")
+                    continue
                 move_to(sx, sy)
                 time.sleep(0.1)
                 mouse_down("left")

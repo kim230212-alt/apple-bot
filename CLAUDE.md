@@ -195,6 +195,40 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - `pickup_001~004` 삭제 — 마우스 호버 상태(노란 텍스트)로 캡처된 구버전
 - `pickup_005~019` 유지 — 흰색 텍스트로 재캡처
 
+### 2026-05-21 작업
+
+#### 창고 루틴 리팩터 (양쪽 엔진 동시 적용)
+- **흐름 통일**: F10 → `warehouse_scroll_click (82, 120)` 클릭 → 텔레포트 대기 → NPC 매칭 클릭 → 혈맹/개인 deposit
+  - 기존: 혈맹/개인 별도 scroll_click 좌표 사용 → 통일
+- **신규 메서드** (`_run_warehouse` 내부 분리):
+  - `_wh_open_and_teleport()`: F10 + scroll_click + scroll_wait 대기
+  - `_wh_open_npc_dialog()`: 창고지기 NPC 매칭 클릭 + 대화창 대기
+  - `_wh_deposit(deposit_click, ok_click, label)`: 물건을 맡긴다 + 아이템 + OK
+- **혈맹+개인 둘 다 켜면**: 혈맹 deposit → ESC → NPC 재클릭 → 개인 deposit → scroll_return
+- `use_personal_warehouse` 추가 (`ent_bot_config.py`, `_PERSIST_KEYS` 등록)
+- `ent_config.json`, `ent_config2.json` 좌표:
+  - `warehouse_scroll_click = [82, 120]`
+  - `warehouse_npc_click = [854, 342]` (NPC 고정 좌표 fallback)
+  - `warehouse_deposit_click = [82, 230]`
+
+#### 창고지기 NPC 매칭 방식 — shop_bot 동일하게 적용 (양쪽 엔진)
+- **`_click_warehouse_npc()`** shop_bot `phase_click_keeper()` 방식으로 교체:
+  - `templates/keeper_name.png` (컬러) 있으면 → 컬러 매칭, threshold **0.75** (우선)
+  - 없으면 `templates/warehouse_keeper.png` (grayscale) → threshold **0.45** (fallback)
+  - 파일 미존재 시 `cv2.imread` 경고 방지: `os.path.exists` 체크 후 로드
+- `templates/extra_npc_001.png.png` → `extra_npc_001.png` 이름 수정 (이중 확장자 버그)
+
+#### 일반창고 GUI 체크박스 추가
+- `ent_bot_gui_dual.py`: "일반창고" 체크박스 추가, `use_personal_warehouse` 토글
+- `ent_bot_gui_template.py`: "일반 창고 사용" 체크박스 추가
+
+#### 디바이스 확인/저장 버튼 GUI 추가 (shop_bot 방식)
+- `keyboard_mouse_check.py` (기존 파일): KB/MS 디바이스 목록 출력 → F10 테스트 → 저장
+- **`ent_bot_gui_dual.py`**: `BotPanel`에 "디바이스" 버튼 추가
+  - 클릭 시 새 콘솔에서 `keyboard_mouse_check.py` 실행 → 종료 후 config 리로드 → 로그에 KB/MS 번호 출력
+- **`ent_bot_gui_template.py`**: 설정 패널 하단에 "디바이스 확인/저장" 버튼 추가
+  - 종료 후 GUI의 키보드/마우스 디바이스 입력란 자동 갱신
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘

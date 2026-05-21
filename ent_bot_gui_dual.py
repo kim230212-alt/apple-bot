@@ -10,8 +10,10 @@ Windows 포그라운드 잠금 거부 문제가 없음.
 from __future__ import annotations
 
 import os
+import sys
 import time
 import threading
+import subprocess
 import tkinter as tk
 from tkinter import ttk, scrolledtext
 import keyboard as kb_module
@@ -83,6 +85,10 @@ class BotPanel(ttk.LabelFrame):
         ttk.Checkbutton(ctrl, text="혈맹창고", variable=self._clan_wh_var,
                         command=self._save_checkboxes).pack(side="left")
 
+        self._personal_wh_var = tk.BooleanVar(value=self.config.use_personal_warehouse)
+        ttk.Checkbutton(ctrl, text="일반창고", variable=self._personal_wh_var,
+                        command=self._save_checkboxes).pack(side="left", padx=6)
+
         self._patrol_rand_var = tk.BooleanVar(value=self.config.patrol_random)
         ttk.Checkbutton(ctrl, text="랜덤순찰", variable=self._patrol_rand_var,
                         command=self._save_checkboxes).pack(side="left", padx=6)
@@ -91,15 +97,19 @@ class BotPanel(ttk.LabelFrame):
         ttk.Checkbutton(ctrl, text=f"판공격", variable=self._extra_npc_var,
                         command=self._save_checkboxes).pack(side="left", padx=6)
 
+        self.dev_btn = ttk.Button(ctrl, text="디바이스", command=self._on_kb_test, width=7)
+        self.dev_btn.pack(side="right", padx=2)
+
         if _HAS_AUTO_LOGIN:
             self.login_btn = ttk.Button(ctrl, text="자동접속",
                                         command=self._on_auto_login, width=9)
             self.login_btn.pack(side="right")
 
     def _save_checkboxes(self):
-        self.config.use_clan_warehouse = self._clan_wh_var.get()
-        self.config.patrol_random = self._patrol_rand_var.get()
-        self.config.extra_npc_enabled = self._extra_npc_var.get()
+        self.config.use_clan_warehouse      = self._clan_wh_var.get()
+        self.config.use_personal_warehouse  = self._personal_wh_var.get()
+        self.config.patrol_random           = self._patrol_rand_var.get()
+        self.config.extra_npc_enabled       = self._extra_npc_var.get()
         self.config.save(self._config_path)
 
     def _build_log(self):
@@ -188,6 +198,28 @@ class BotPanel(ttk.LabelFrame):
             if success:
                 self._append_log("[자동접속] 완료 → 엔진 재초기화")
                 self.after(0, self._init_async)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_kb_test(self):
+        self.dev_btn.configure(state="disabled")
+        self._append_log("[디바이스] keyboard_mouse_check.py 실행 중...")
+
+        def worker():
+            try:
+                proc = subprocess.Popen(
+                    [sys.executable, "-X", "utf8", "keyboard_mouse_check.py"],
+                    cwd=BASE_DIR, creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+                proc.wait()
+                self.config.load(self._config_path)
+                kb = self.config.keyboard_device
+                ms = self.config.mouse_device
+                self.after(0, self._append_log, f"[디바이스] 갱신  KB={kb}  MS={ms}")
+            except Exception as e:
+                self.after(0, self._append_log, f"[디바이스] 오류: {e}")
+            finally:
+                self.after(0, lambda: self.dev_btn.configure(state="normal"))
 
         threading.Thread(target=worker, daemon=True).start()
 

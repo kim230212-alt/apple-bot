@@ -56,9 +56,9 @@ class BotConfig:
         self.mp_wait_timeout = 120
 
         # 창고
-        self.warehouse_scroll_click = (57, 122)
+        self.warehouse_scroll_click = (82, 230)
         self.warehouse_npc_click = (854, 342)
-        self.warehouse_deposit_click = (92, 165)
+        self.warehouse_deposit_click = (82, 230)
         self.warehouse_ok_click = (288, 555)
         self.warehouse_item_threshold = 0.7
 
@@ -74,7 +74,8 @@ class BotConfig:
         ]
 
         # 혈맹 창고
-        self.use_clan_warehouse = False
+        self.use_clan_warehouse  = False
+        self.use_personal_warehouse = False
         self.clan_warehouse_scroll_click = (54, 282)
         self.clan_warehouse_npc_click = (714, 318)
         self.clan_warehouse_deposit_click = (65, 323)
@@ -156,7 +157,7 @@ class BotConfig:
         "warehouse_ok_click", "warehouse_scroll_click",
         "warehouse_item_threshold",
         "deposit_items",
-        "use_clan_warehouse",
+        "use_clan_warehouse", "use_personal_warehouse",
         "clan_warehouse_scroll_click", "clan_warehouse_npc_click",
         "clan_warehouse_deposit_click", "clan_warehouse_ok_click",
         "stuck_history_size", "stuck_radius", "stuck_check_interval",

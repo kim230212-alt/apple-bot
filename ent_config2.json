@@ -72,16 +72,16 @@
     342
   ],
   "warehouse_deposit_click": [
-    92,
-    165
+    82,
+    230
   ],
   "warehouse_ok_click": [
     288,
     555
   ],
   "warehouse_scroll_click": [
-    57,
-    122
+    82,
+    120
   ],
   "warehouse_item_threshold": 0.7,
   "deposit_items": [
@@ -115,6 +115,7 @@
     }
   ],
   "use_clan_warehouse": true,
+  "use_personal_warehouse": true,
   "clan_warehouse_scroll_click": [
     60,
     121
