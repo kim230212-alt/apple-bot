@@ -44,10 +44,13 @@
   "hp_check_interval": 10.0,
   "hp_f8_cooldown": 3.0,
   "mp_full_pos": [
-    935,
-    770
+    780,
+    769
   ],
+  "mp_bright_threshold": 250,
   "mp_wait_timeout": 120,
+  "baatu_hp_pos": null,
+  "baatu_hp_threshold": 200,
   "player_pos": [
     636,
     340

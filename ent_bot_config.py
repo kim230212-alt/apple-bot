@@ -53,7 +53,12 @@ class BotConfig:
 
         # MP 풀 감지 (복귀 후 대기)
         self.mp_full_pos = (962, 833)
+        self.mp_bright_threshold = 250
         self.mp_wait_timeout = 120
+
+        # 바투(F5) HP 체크 (baatu_hp_pos 없으면 HP 체크 안 함)
+        self.baatu_hp_pos = None
+        self.baatu_hp_threshold = 200
 
         # 창고
         self.warehouse_scroll_click = (82, 230)
@@ -150,7 +155,8 @@ class BotConfig:
         "scroll_key", "scroll_click", "scroll_wait",
         "weight_pos", "weight_bar", "weight_threshold",
         "hp_pos", "hp_check_interval", "hp_f8_cooldown",
-        "mp_full_pos", "mp_wait_timeout",
+        "mp_full_pos", "mp_bright_threshold", "mp_wait_timeout",
+        "baatu_hp_pos", "baatu_hp_threshold",
         "player_pos", "chat_rect", "ocr_scan_rect",
         "npc_name", "pickup_keyword", "pickup_conf",
         "warehouse_npc_click", "warehouse_deposit_click",

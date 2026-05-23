@@ -229,6 +229,58 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - **`ent_bot_gui_template.py`**: 설정 패널 하단에 "디바이스 확인/저장" 버튼 추가
   - 종료 후 GUI의 키보드/마우스 디바이스 입력란 자동 갱신
 
+### 2026-05-23 작업
+
+#### 창고지기 NPC 대화창 무한 재시도 (`_wh_open_npc_dialog`)
+- **문제**: NPC가 바쁠 때 대화창 미열림 → 기존 최대 N회 후 포기 로직
+- **수정**: ESC 없이 `_running` 동안 무한 재클릭 (창고 과부하 시 반드시 입장해야 하므로)
+- `attempt` 카운터 로그만 유지, `retry_wait=1.5s` 마다 재시도
+
+#### 사망 복귀 로직 전면 재설계
+
+**`_do_baatu_until_mp_ready(tag)` 신규 (공용 바투 루프)**
+- HP/MP 픽셀 체크 기반 F5 바투 반복 (3초 간격)
+- HP 체크: `baatu_hp_pos` 픽셀 합산 > `baatu_hp_threshold(200)` → HP 부족 → 스킵 3초 대기
+- MP 체크: `mp_full_pos` 픽셀 합산 < `mp_bright_threshold(250)` → MP 충분 → 루프 탈출
+- `mp_wait_timeout(120s)` 초과 시 그냥 진행
+- `tag` 파라미터로 로그 prefix 구분 (`DEAD` / `RETURN`)
+
+**`_do_death_return` 재설계**
+- 기존: F9 → 10초 → F5×3 → MP HSV 감지 대기
+- 변경: F9 → 10초 → `_do_baatu_until_mp_ready("DEAD")` → F11
+
+**`_do_f9_return` 재설계**
+- 기존: F9 → 3초 → F5×3 → 5초 고정 대기
+- 변경: F9 → 3초 → `_do_baatu_until_mp_ready("RETURN")`
+- `_f11_to_zone`, `_scroll_return` 모두 동일 바투 루프 적용
+
+#### MP/HP 픽셀 감지 방식 교체 (HSV → 밝기 합산)
+- **MP**: HSV 파란색 범위(H:80~140) → `bright = b+g+r`, `bright < threshold` = 충분
+  - MP 바는 채워지면 어두워지는 구조 (empty=305, full=184)
+  - `mp_bright_threshold: 250` (기본값)
+  - `mp_full_pos`: 원하는 MP 기준치 위치 픽셀 좌표
+- **HP (바투용)**: `baatu_hp_pos` 픽셀 합산 > `baatu_hp_threshold` = 부족
+  - HP 바도 채워지면 어두워지는 구조 (full=어두움, empty=밝음)
+  - `baatu_hp_pos: null` 이면 HP 체크 없이 항상 바투
+
+#### BotConfig 신규 키 (`ent_bot_config.py`)
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `mp_bright_threshold` | 250 | MP 충분 기준 밝기 합산 (pixel sum < thr → 충분) |
+| `baatu_hp_pos` | null | 바투 HP 기준 픽셀 좌표 (null=체크 안 함) |
+| `baatu_hp_threshold` | 200 | 바투 HP 부족 기준 (pixel sum > thr → 부족) |
+
+#### Restart 버튼 클릭 개선 (`_handle_death`)
+- 기존: 클릭 후 5초 1회 대기 → 재확인
+- 변경: 클릭 후 **0.5초 간격 최대 16회(8초)** 폴링 → 버튼 사라지면 즉시 다음 단계
+- 버튼 사라질 때까지 매 폴링마다 위치 갱신 → 8초 후에도 잔존 시 재클릭
+
+#### 신규 도구
+- `test_mp_detect.py`: 게임창 클릭으로 `mp_full_pos` 설정, READY/WAITING 실시간 표시, S키 저장
+- `test_baatu_hp.py`: 게임창 클릭으로 `baatu_hp_pos` 설정, READY/WAITING 실시간 표시, S키 저장
+- `test_wh_npc_dialog.py`: 창고지기 NPC 클릭 + 대화창 열림 단독 테스트
+- `coord_picker.py`: 클릭 좌표 + BGR/RGB 동시 출력
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘

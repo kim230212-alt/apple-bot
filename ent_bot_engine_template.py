@@ -724,13 +724,12 @@ class BotEngine:
 
     def _is_mp_full(self, frame) -> bool:
         mx, my = self.cfg.mp_full_pos
-        roi = frame[my - 5:my + 5, mx - 5:mx + 5]
-        if roi.size == 0:
+        fh, fw = frame.shape[:2]
+        if not (0 <= mx < fw and 0 <= my < fh):
             return False
-        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
-        mask = ((hsv[:,:,0] >= 80) & (hsv[:,:,0] <= 140)
-                & (hsv[:,:,1] > 20) & (hsv[:,:,2] > 60))
-        return np.sum(mask) / mask.size > 0.3
+        b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
+        thr = int(getattr(self.cfg, "mp_bright_threshold", 250))
+        return (b + g + r) < thr
 
     def _check_hp_green_and_press(self, frame):
         """HP바가 초록이면 F8 (쿨타임 적용)"""
@@ -886,21 +885,25 @@ class BotEngine:
             time.sleep(0.5)
         return True
 
-    def _wh_open_npc_dialog(self) -> bool:
-        """창고지기 NPC 클릭 후 대화창 열림 대기."""
-        self._click_warehouse_npc(self._warehouse_keeper_tmpl, self.cfg.warehouse_npc_click,
-                                  label="창고지기")
-        self._interruptible_sleep(2.0)
-        if not self._running:
-            return False
+    def _wh_open_npc_dialog(self, retry_wait: float = 1.5) -> bool:
+        """창고지기 NPC 클릭 후 대화창 열림 대기. 열릴 때까지 재클릭 반복."""
+        attempt = 0
+        while self._running:
+            attempt += 1
+            self._click_warehouse_npc(self._warehouse_keeper_tmpl, self.cfg.warehouse_npc_click,
+                                      label="창고지기")
 
-        for _ in range(30):
-            chk = self._wincap.get_screenshot()
-            if self._is_dialog_open(chk):
-                break
-            time.sleep(0.1)
-        time.sleep(0.3)
-        return True
+            deadline = time.time() + retry_wait
+            while self._running and time.time() < deadline:
+                chk = self._wincap.get_screenshot()
+                if self._is_dialog_open(chk):
+                    time.sleep(0.3)
+                    return True
+                time.sleep(0.1)
+
+            self.log(f"[WH] 대화창 미열림 (NPC 바쁨?) attempt={attempt} → 재클릭")
+
+        return False
 
     def _wh_deposit(self, deposit_click, ok_click, label: str):
         """'물건을 맡긴다' 메뉴 클릭 → 아이템 맡기기 → OK."""
@@ -964,22 +967,79 @@ class BotEngine:
         missing = [n for _, n in items if n not in deposited]
         self.log(f"    맡기기 결과: 성공 {sorted(deposited)}  미발견 {missing}")
 
+    def _do_baatu_until_mp_ready(self, tag: str = "RETURN"):
+        """바투(F5) 반복: HP 충분할 때만 F5, MP 찰 때까지 (3초 간격)."""
+        mp_timeout  = float(getattr(self.cfg, "mp_wait_timeout", 120))
+        mp_thr      = int(getattr(self.cfg, "mp_bright_threshold", 250))
+        mx, my      = self.cfg.mp_full_pos
+        hp_pos      = getattr(self.cfg, "baatu_hp_pos", None)
+        hp_thr      = int(getattr(self.cfg, "baatu_hp_threshold", 200))
+        deadline    = time.time() + mp_timeout
+        attempt     = 0
+        mp_ready    = False
+        while self._running and time.time() < deadline:
+            frame = self._wincap.get_screenshot()
+            fh, fw = (frame.shape[:2] if frame is not None else (0, 0))
+            # HP 체크
+            if hp_pos and frame is not None:
+                hx, hy = hp_pos
+                if 0 <= hx < fw and 0 <= hy < fh:
+                    hb, hg, hr = int(frame[hy, hx][0]), int(frame[hy, hx][1]), int(frame[hy, hx][2])
+                    hp_bright = hb + hg + hr
+                    self.log(f"[{tag}] HP 픽셀 ({hx},{hy}) BGR=({hb},{hg},{hr}) 합={hp_bright}")
+                    if hp_bright > hp_thr:
+                        self.log(f"[{tag}] HP 부족 → 바투 스킵, 3초 대기")
+                        self._interruptible_sleep(3)
+                        if frame is not None and 0 <= mx < fw and 0 <= my < fh:
+                            b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
+                            if (b + g + r) < mp_thr:
+                                mp_ready = True
+                        if mp_ready:
+                            break
+                        continue
+            # HP 충분 → 바투
+            attempt += 1
+            self._ikey_force("f5")
+            self.log(f"[{tag}] 바투(F5) #{attempt}")
+            self._interruptible_sleep(3)
+            if not self._running:
+                return
+            frame = self._wincap.get_screenshot()
+            if frame is not None:
+                fh, fw = frame.shape[:2]
+                if 0 <= mx < fw and 0 <= my < fh:
+                    b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
+                    bright = b + g + r
+                    self.log(f"[{tag}] MP 픽셀 ({mx},{my}) BGR=({b},{g},{r}) 합={bright}")
+                    if bright < mp_thr:
+                        self.log(f"[{tag}] MP 충분 (합={bright}<{mp_thr})")
+                        mp_ready = True
+                        break
+        if not mp_ready:
+            self.log(f"[{tag}] MP 대기 시간 초과 → 그냥 진행")
+
     def _do_f9_return(self):
-        """F9 → 마을 복귀 (F5×3 포함). _f11_to_zone / _scroll_return 공용."""
+        """F9 → 마을 복귀 + 바투 루프. _f11_to_zone / _scroll_return 공용."""
         self.log("[RETURN] F9 실행 → 3초 대기")
         self._ikey_force("f9")
         self._interruptible_sleep(3)
         if not self._running:
             return
-        self.log("[RETURN] 바투 F5 × 3회 시작")
-        for i in range(1, 4):
-            if not self._running:
-                return
-            self._ikey_force("f5")
-            self.log(f"[RETURN] F5 ({i}/3)")
-            self._interruptible_sleep(3)
-        self.log("[RETURN] 5초 대기")
-        self._interruptible_sleep(5)
+        self._do_baatu_until_mp_ready("RETURN")
+
+    def _do_death_return(self):
+        """사망 후 복귀: F9 → 10초 대기 → 바투 루프 → F11 → 패트롤."""
+        self.log("[DEAD] F9 세계수 복귀")
+        self._ikey_force("f9")
+        self._interruptible_sleep(10)
+        if not self._running:
+            return
+        self._do_baatu_until_mp_ready("DEAD")
+        if not self._running:
+            return
+        self.log("[DEAD] F11 순간이동")
+        self._ikey_force("f11")
+        self._interruptible_sleep(2)
 
     def _f11_to_zone(self, max_retry: int = 5):
         """F11 순간이동 후 요정 숲 확인. 실패 시 F9 복귀 후 재시도."""
@@ -1139,24 +1199,31 @@ class BotEngine:
                 move_to(sx, sy)
                 time.sleep(0.1)
                 mouse_down("left")
-                time.sleep(0.03)
+                time.sleep(0.05)
                 mouse_up("left")
             self.log(f"[DEAD] 사망 감지 → Restart 클릭  ({rx},{ry})")
-            time.sleep(5.0)
-            chk = self._wincap.get_screenshot()
-            if chk is None:
-                continue
-            still_dead, new_loc = self._is_dead(chk)
-            if not still_dead:
+            # 클릭 후 최대 8초간 0.5초 주기로 버튼 사라짐 확인
+            btn_gone = False
+            for _ in range(16):
+                time.sleep(0.5)
+                chk = self._wincap.get_screenshot()
+                if chk is None:
+                    continue
+                still_dead, new_loc = self._is_dead(chk)
+                if not still_dead:
+                    btn_gone = True
+                    break
+                # 버튼 위치 갱신
+                rh2, rw2 = self._restart_tmpl.shape[:2]
+                rx = new_loc[0] + rw2 // 2
+                ry = new_loc[1] + rh2 // 2
+                sx, sy = self._wincap.get_screen_position((rx, ry))
+            if btn_gone:
                 break
-            self.log("[DEAD] Restart 버튼 아직 있음 → 재클릭")
-            rh2, rw2 = self._restart_tmpl.shape[:2]
-            rx = new_loc[0] + rw2 // 2
-            ry = new_loc[1] + rh2 // 2
-            sx, sy = self._wincap.get_screen_position((rx, ry))
+            self.log("[DEAD] Restart 8초 후에도 잔존 → 재클릭")
 
         self.npc_pos = None
-        self._f11_to_zone()
+        self._do_death_return()
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")
@@ -1185,7 +1252,7 @@ class BotEngine:
         time.sleep(5.0)
         self._type_location_cmd()
         self.npc_pos = None
-        self._f11_to_zone()
+        self._do_death_return()
         self._last_npc_found_t = time.time()
         self._last_weight_check_t = time.time()
         self._set_state("PATROL")

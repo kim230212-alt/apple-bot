@@ -51,10 +51,16 @@
   "hp_check_interval": 10.0,
   "hp_f8_cooldown": 3.0,
   "mp_full_pos": [
-    935,
+    900,
     770
   ],
+  "mp_bright_threshold": 250,
   "mp_wait_timeout": 120,
+  "baatu_hp_pos": [
+    333,
+    770
+  ],
+  "baatu_hp_threshold": 200,
   "player_pos": [
     636,
     340
@@ -122,7 +128,7 @@
     }
   ],
   "use_clan_warehouse": false,
-  "use_personal_warehouse": true,
+  "use_personal_warehouse": false,
   "clan_warehouse_scroll_click": [
     60,
     121
