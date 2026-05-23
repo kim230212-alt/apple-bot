@@ -281,6 +281,15 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - `test_wh_npc_dialog.py`: 창고지기 NPC 클릭 + 대화창 열림 단독 테스트
 - `coord_picker.py`: 클릭 좌표 + BGR/RGB 동시 출력
 
+#### F9 버프 감지 시도 → 롤백
+
+- **시도**: F9 세계수 복귀 성공 여부를 우측 상단 버프 아이콘 템플릿 매칭으로 확인
+  - `_is_f9_buffed(frame)`: `templates/f9_buff.png` 매칭, threshold 0.75
+  - `capture_f9_buff.py`: 버프 아이콘 ROI 드래그 캡처 도구 (신규)
+- **문제**: 사망 후 게임 로딩 화면에서 `baatu_hp_pos(333,770)` 픽셀이 항상 bright > 200 → HP 부족 판단 → 바투 스킵 → MP 타임아웃 → F9 120초 뒤에야 실행
+- **롤백**: `_press_f9_until_buffed`, `check_hp` 파라미터 제거. `_do_f9_return`/`_do_death_return` 단순 버전 복원
+- **현재 상태**: `_is_f9_buffed()` + `_f9_buff_tmpl` 로드는 코드에 잔존 (dead code, `required=False`)
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘

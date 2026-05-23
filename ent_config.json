@@ -128,7 +128,7 @@
     }
   ],
   "use_clan_warehouse": false,
-  "use_personal_warehouse": false,
+  "use_personal_warehouse": true,
   "clan_warehouse_scroll_click": [
     60,
     121

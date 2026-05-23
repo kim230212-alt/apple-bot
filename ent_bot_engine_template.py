@@ -322,6 +322,7 @@ class BotEngine:
         self._bark_tmpl = _load("ent_bark.png", required=False)
         self._chat_atk_tmpl = _load("chat_attack.png")
         self._chat_revive_tmpl = _load("chat_revive.png", required=False)
+        self._f9_buff_tmpl = _load("f9_buff.png", required=False)
 
         # 픽업 인라인 매칭용 (subprocess 불필요, 항상 신선한 좌표)
         self._pickup_tmpls = []
@@ -721,6 +722,14 @@ class BotEngine:
         _, max_val, _, _ = cv2.minMaxLoc(result)
         self.log(f"[ZONE] score={max_val:.3f}")
         return max_val >= 0.70
+
+    def _is_f9_buffed(self, frame) -> bool:
+        """우측 상단 버프창에서 F9 세계수 복귀 버프 아이콘 감지."""
+        if self._f9_buff_tmpl is None or frame is None:
+            return False
+        result = cv2.matchTemplate(frame, self._f9_buff_tmpl, cv2.TM_CCOEFF_NORMED)
+        _, max_val, _, _ = cv2.minMaxLoc(result)
+        return max_val >= 0.75
 
     def _is_mp_full(self, frame) -> bool:
         mx, my = self.cfg.mp_full_pos
