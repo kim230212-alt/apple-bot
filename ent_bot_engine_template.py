@@ -93,6 +93,7 @@ class BotEngine:
         self._last_weight_check_t = 0.0
         self._last_hp_check_t = 0.0
         self._last_hp_f8_t = 0.0
+        self._last_patrol_hp_escape_t = 0.0
         self._last_stuck_check_t = 0.0
         self._last_zone_check_t = 0.0
         self._last_atk_msg_t = 0.0
@@ -761,6 +762,33 @@ class BotEngine:
             self.log(f"[HP] 초록 감지 → F8  (비율={ratio:.2f})")
             self._ipress("f8")
 
+    def _check_patrol_hp_escape(self, frame) -> bool:
+        """패트롤/전투 중 HP 부족 감지 → F9 세계수 복귀. 트리거 시 True 반환.
+        HP 바 픽셀: HP 있으면 빨강(어두움), 없으면 배경(밝음) → bright > threshold = HP 부족."""
+        if not getattr(self.cfg, "patrol_hp_escape_enabled", False):
+            return False
+        hp_pos = getattr(self.cfg, "patrol_hp_pos", None)
+        if not hp_pos:
+            return False
+        now = time.time()
+        hx, hy = int(hp_pos[0]), int(hp_pos[1])
+        pix = frame[hy, hx]
+        bright = int(pix[0]) + int(pix[1]) + int(pix[2])
+        hp_thr = int(getattr(self.cfg, "patrol_hp_threshold", 100))
+        # 10초마다 현재 밝기값 출력 (임계값 조정용)
+        if now - self._last_patrol_hp_escape_t >= 10.0 or self._last_patrol_hp_escape_t == 0.0:
+            b, g, r = int(pix[0]), int(pix[1]), int(pix[2])
+            self.log(f"[HP체크] bright={bright}  BGR=({b},{g},{r})  threshold={hp_thr}  pos=({hx},{hy})")
+            self._last_patrol_hp_escape_t = now
+        if bright > hp_thr:
+            self._last_patrol_hp_escape_t = now + 30.0  # 30초 쿨다운
+            self.log(f"[HP탈출] HP 부족 감지 (bright={bright} > {hp_thr}) → F9 복귀")
+            self._scroll_return()
+            self.npc_pos = None
+            self._set_state("PATROL")
+            return True
+        return False
+
     def _find_item(self, frame, tmpl, name="item"):
         result = cv2.matchTemplate(frame, tmpl, cv2.TM_CCOEFF_NORMED)
         _, max_val, _, max_loc = cv2.minMaxLoc(result)
@@ -1001,7 +1029,10 @@ class BotEngine:
                         self._interruptible_sleep(3)
                         if frame is not None and 0 <= mx < fw and 0 <= my < fh:
                             b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
-                            if (b + g + r) < mp_thr:
+                            mp_bright_skip = b + g + r
+                            self.log(f"[{tag}] MP 픽셀 ({mx},{my}) BGR=({b},{g},{r}) 합={mp_bright_skip} (HP스킵 중 확인)")
+                            if mp_bright_skip < mp_thr:
+                                self.log(f"[{tag}] MP 충분 → 바투 종료")
                                 mp_ready = True
                         if mp_ready:
                             break
@@ -1392,6 +1423,11 @@ class BotEngine:
 
             # ── HP 초록 감지 → F8 ──
             self._check_hp_green_and_press(frame)
+
+            # ── HP 부족 → F9 세계수 복귀 ──
+            if self.state in ("PATROL", "APPROACH", "FIGHTING"):
+                if self._check_patrol_hp_escape(frame):
+                    continue
 
             # ── 무게 초과 ──
             if self.state in ("PATROL", "FIGHTING") and self._check_weight_over(frame):

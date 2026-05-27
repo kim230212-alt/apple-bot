@@ -60,6 +60,11 @@ class BotConfig:
         self.baatu_hp_pos = None
         self.baatu_hp_threshold = 200
 
+        # 패트롤/전투 중 HP 부족 → F9 세계수 복귀
+        self.patrol_hp_escape_enabled = False
+        self.patrol_hp_pos = None        # 감시 픽셀 좌표 [x, y]
+        self.patrol_hp_threshold = 400   # 픽셀 밝기 합산 > 이 값 = HP 부족 (HP 바 없음)
+
         # 창고
         self.warehouse_scroll_click = (82, 230)
         self.warehouse_npc_click = (854, 342)
@@ -170,6 +175,7 @@ class BotConfig:
         "stuck_no_move_max",
         "window_index",
         "extra_npc_enabled", "extra_npc_name",
+        "patrol_hp_escape_enabled", "patrol_hp_pos", "patrol_hp_threshold",
     ]
 
     def load(self, path: str):

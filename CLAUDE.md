@@ -290,6 +290,35 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - **롤백**: `_press_f9_until_buffed`, `check_hp` 파라미터 제거. `_do_f9_return`/`_do_death_return` 단순 버전 복원
 - **현재 상태**: `_is_f9_buffed()` + `_f9_buff_tmpl` 로드는 코드에 잔존 (dead code, `required=False`)
 
+### 2026-05-25 ~ 05-27 작업
+
+#### 패트롤 중 HP 부족 → F9 세계수 복귀 (`patrol_hp_escape`)
+
+**신규 로직** (`ent_bot_engine_template.py`)
+- `_check_patrol_hp_escape(frame)`: PATROL/APPROACH/FIGHTING 상태에서 매 프레임 HP 픽셀 확인
+  - HP 바 있음(빨강): bright 낮음 → 탈출 안 함
+  - HP 바 없음(배경): bright 높음 → `_scroll_return()` 호출 → F9 복귀
+  - 30초 쿨다운 (복귀 중 재트리거 방지)
+- 메인 루프에서 `_check_hp_green_and_press` 직후 호출
+
+**신규 config 키** (`ent_bot_config.py`)
+| 키 | 기본값 | 설명 |
+|---|---|---|
+| `patrol_hp_escape_enabled` | False | 패트롤 HP 탈출 활성화 |
+| `patrol_hp_pos` | null | 감시 픽셀 좌표 [x, y] |
+| `patrol_hp_threshold` | 400 | bright > 이 값 = HP 부족 (배경 노출) |
+
+**ent_config.json 실측값** (픽셀 좌표 377,768 기준)
+- HP 바 있음(풀피): `BGR=(3,21,201)` bright≈225
+- HP 바 없음(부족): `BGR=(244,242,255)` bright≈741
+- 임계값: 400 (225~741 사이)
+
+#### 바투 임계값 교정
+
+- **`baatu_hp_threshold`** 200 → **400** (픽셀 bright=225가 풀피인데 200 초과로 "부족" 오판 수정)
+- **`mp_bright_threshold`** 250 → **380** (MP 준비 bright≈315~318, 기존 250 미만 미달로 루프 탈출 불가 수정)
+- HP 스킵 중 MP 확인 로그 추가 (`[RETURN] MP 픽셀 ... (HP스킵 중 확인)` / `MP 충분 → 바투 종료`)
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘
