@@ -56,6 +56,7 @@ def ocr_process_fn(stop_evt, frame_q, result_q, ready_evt):
         npc_name = data['npc_name']
         pickup_conf = data['pickup_conf']
         pickup_exclude = data['pickup_exclude']
+        pickup_keyword = data.get('pickup_keyword', ['정령'])  # 하위 호환
         player_pos = data['player_pos']
         npc_pos = data['npc_pos']
         focus_half = data['focus_half']
@@ -109,7 +110,7 @@ def ocr_process_fn(stop_evt, frame_q, result_q, ready_evt):
                     candidates.append((cx, cy, conf))
 
                 if (
-                    "정령" in text_clean
+                    any(kw in text_clean for kw in pickup_keyword)
                     and not any(ex in text_clean for ex in pickup_exclude)
                     and conf >= pickup_conf
                     and pickup_pos is None

@@ -32,7 +32,8 @@ SERVERS_PAGE1 = [
 ]
 SERVERS_PAGE2 = [
     "대전", "아인하자드", "파이그리오", "에바",
-    "사이하", "마프른", "린텔", "하이네", "로엔그린",
+    "사이하", "마프른", "린텔", "하이네",
+    "로엔그린", "발라카스",
 ]
 ALL_SERVERS = SERVERS_PAGE1 + SERVERS_PAGE2
 
@@ -216,6 +217,7 @@ def run_auto_login(cfg, log_fn, init_devices=True):
     tmpl_ok_login = cv2.imread(f"{TMPL_DIR}/ok_login_btn.png")
     tmpl_page2 = cv2.imread(f"{TMPL_DIR}/page2_btn.png")
     tmpl_skip  = cv2.imread(f"{TMPL_DIR}/skip_btn.png")
+    tmpl_wait  = cv2.imread(f"{TMPL_DIR}/wait.png")
 
     def tmpl_find(frame, tmpl):
         """프레임에서 템플릿을 찾아 중심 (cx, cy, 신뢰도) 반환. 없으면 None."""
@@ -414,6 +416,36 @@ def run_auto_login(cfg, log_fn, init_devices=True):
     if after_srv is not None:
         save_debug(after_srv, "after_server_click")
     log_fn("  서버 선택 완료")
+
+    # 4.2. 접속 대기열 다이얼로그(wait.png) — 떠 있으면 사라질 때까지 대기
+    if tmpl_wait is not None:
+        # 다이얼로그가 뜨는지 짧게 확인 (3초)
+        wait_detected = False
+        t0 = time.time()
+        while time.time() - t0 < 3:
+            f = grab_frame(hwnd)
+            if f is not None and tmpl_find(f, tmpl_wait):
+                wait_detected = True
+                break
+            time.sleep(0.3)
+
+        if wait_detected:
+            log_fn("[4.2/6] 접속 대기열 감지 → 사라질 때까지 대기 (최대 30분)...")
+            queue_start = time.time()
+            last_log = queue_start
+            while time.time() - queue_start < 1800:  # 30분 타임아웃
+                f = grab_frame(hwnd)
+                if f is not None and tmpl_find(f, tmpl_wait) is None:
+                    elapsed = int(time.time() - queue_start)
+                    log_fn(f"  대기열 통과! ({elapsed}s)")
+                    break
+                now = time.time()
+                if now - last_log >= 30:
+                    log_fn(f"  대기 중... ({int(now - queue_start)}s)")
+                    last_log = now
+                time.sleep(1.0)
+            else:
+                log_fn("  대기열 30분 타임아웃 → 진행 시도")
 
     # 4.5. 업데이트 공지 (주 1회 정도만 등장) — skip 버튼 있으면 클릭
     log_fn("[4.5/6] 업데이트 공지 확인 (8초 대기)...")

@@ -27,10 +27,18 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # 경로 설정
 # ---------------------------------------------------------------------------
-if getattr(sys, "frozen", False):
-    BASE_DIR = os.path.dirname(sys.executable)
-else:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+def _get_base_dir() -> str:
+    # PyInstaller onefile: sys._MEIPASS 존재 + sys.executable = 실제 exe 경로
+    if hasattr(sys, "_MEIPASS"):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    try:
+        return os.path.dirname(os.path.abspath(__file__))
+    except Exception:
+        return os.getcwd()
+
+BASE_DIR = _get_base_dir()
 
 APP_DIR      = os.path.join(BASE_DIR, "app")
 CONFIG_FILE  = os.path.join(BASE_DIR, "launcher_config.json")

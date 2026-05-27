@@ -57,6 +57,10 @@ def main():
          "--name", "launcher",
          "--hidden-import", "requests",
          "--hidden-import", "tkinter",
+         "--hidden-import", "tkinter.ttk",
+         "--hidden-import", "tkinter.messagebox",
+         "--hidden-import", "tkinter.filedialog",
+         "--hidden-import", "tkinter.simpledialog",
          "--hidden-import", "uuid",
          *add_data_args,
          armored_entry])
@@ -64,9 +68,7 @@ def main():
     # 배포 폴더 구성
     print("\n[4/4] 배포 폴더 구성 중...")
     dist_dir = os.path.join(BASE_DIR, "dist", "ent_bot_deploy")
-    if os.path.exists(dist_dir):
-        shutil.rmtree(dist_dir)
-    os.makedirs(dist_dir)
+    os.makedirs(dist_dir, exist_ok=True)
 
     for fname in ["launcher.exe", ]:
         src = os.path.join(BASE_DIR, "dist", fname)

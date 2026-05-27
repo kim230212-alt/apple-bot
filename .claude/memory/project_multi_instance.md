@@ -34,4 +34,8 @@ run_dual.bat   # 관리자 권한 자동 상승 → ent_bot_gui_dual.py 실행
 - `keyboard_device: 0` (topviewer 가상 키보드) — 정상 작동 확인, 건드리지 말 것
 - auto_capture_devices가 device 6 (Logitech 마우스 인터페이스)을 키보드로 오감지함
 
+**2026-05-16 추가:**
+- 판 NPC 추가 공격 옵션: `extra_npc_enabled/extra_npc_name` (config), `extra_npc_*.png` (scanner), 듀얼 GUI "판공격" 체크박스
+- F11/F9 복귀 개선: `_do_f9_return()` 분리, `_f11_to_zone()` 실패 시 F9 복귀 후 재시도
+
 **How to apply:** 듀얼 관련 수정은 `ent_bot_engine_template.py`만 수정 (CUDA 버전은 듀얼 미사용).
