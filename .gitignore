@@ -5,3 +5,8 @@ __pycache__/
 *.log
 test_ocr_*.png
 test_paddle_result.png
+launcher_config.json
+.lic
+update.zip
+_update_pkg/
+_armored/
