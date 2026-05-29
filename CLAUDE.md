@@ -319,6 +319,31 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - **`mp_bright_threshold`** 250 → **380** (MP 준비 bright≈315~318, 기존 250 미만 미달로 루프 탈출 불가 수정)
 - HP 스킵 중 MP 확인 로그 추가 (`[RETURN] MP 픽셀 ... (HP스킵 중 확인)` / `MP 충분 → 바투 종료`)
 
+### 2026-05-30 작업
+
+#### 픽업 감지 복원 — 이진화 제거, 그레이스케일 매칭으로 전환
+
+**원인 분석**
+- 2026-05-19에 추가한 `BINARY_THRESHOLD=128` 이진화가 실제 게임 환경에서 픽업 감지를 망가뜨림
+- 게임 배경에 밝기 128 이상 픽셀 존재 시 이진화 후 255로 변환 → 템플릿(배경=0)과 anti-correlation 발생 → score 임계값(0.72) 미달 → 감지 실패
+- `test_pickup_match.py`(그레이스케일 방식)는 score 0.80~0.84로 HIT, 봇 스캐너(이진화 방식)는 미감지
+
+**수정** (`template_scanner.py`, `ent_bot_engine_template.py`)
+- pickup 템플릿 로드: binary 제거 → grayscale 유지
+- 프레임 매칭: `game_binary` → `game_gray` 로 전환 (이진화 스텝 제거)
+- `_load_templates`, `_find_pickup_inline` 동일하게 grayscale 처리
+- 결과 dict에 `pickup_max_score` / `pickup_max_name` 추가 (임계값 미달 시도 최고점수 포함, 향후 진단용)
+- `test_pickup_match.py`: `PICKUP_THRESHOLDS` 를 `template_scanner.py` 와 일치하도록 수정 (`pickup_012.png` → 0.80)
+- `BINARY_THRESHOLD` 상수 자체는 `capture_pickup_template.py` 내부 테스트용으로 잔존
+
+#### HP F8 포커스 리스 대기 우회 (`ent_bot_engine_template.py`)
+- **문제**: 듀얼 모드에서 다른 봇이 창고 작업 중(포커스 리스 보유) → `_ipress` 내부 `_wait_for_lease()` 최대 120초 대기 → HP 물약 F8 차단
+- **수정**: `_ipress(key, wait_lease=True)` 파라미터 추가, HP F8 호출 시 `wait_lease=False` 전달
+
+#### ent_config2.json 바투/MP 임계값 수정
+- `mp_bright_threshold` 250 → **380** (Bot2에도 ent_config.json 과 동일 교정값 적용)
+- `baatu_hp_threshold` 200 → **400** (동일)
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘
