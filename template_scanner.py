@@ -46,16 +46,15 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
             npc_templates.append((gray, h, w, name))
             print(f"[TMPL] NPC 템플릿 로드: {name}  {w}x{h}")
 
-    # ── 줍기 템플릿 로드 (pickup_*.png) — 이진화 전처리 적용 ──
+    # ── 줍기 템플릿 로드 (pickup_*.png) — 그레이스케일 매칭 ──
     pickup_templates = []
     for f in sorted(glob.glob(os.path.join(TMPL_DIR, "pickup_*.png"))):
         tmpl = cv2.imread(f, cv2.IMREAD_COLOR)
         if tmpl is not None:
             gray = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
-            _, binary = cv2.threshold(gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
-            h, w = binary.shape[:2]
+            h, w = gray.shape[:2]
             name = os.path.basename(f)
-            pickup_templates.append((binary, h, w, name))
+            pickup_templates.append((gray, h, w, name))
             print(f"[TMPL] PICKUP 템플릿 로드: {name}  {w}x{h}")
 
     # ── 추가 NPC 템플릿 로드 (extra_npc_*.png) ──
@@ -161,15 +160,20 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
         # NMS: 중복 제거 (가까운 매칭 중 최고 점수만 유지)
         candidates = _nms(candidates, min_dist=40)
 
-        # ── 줍기 템플릿 매칭 — 이진화 후 매칭, 모든 템플릿 중 최고 점수 선택 ──
-        _, game_binary = cv2.threshold(game_gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
+        # ── 줍기 템플릿 매칭 — 그레이스케일 매칭, 모든 템플릿 중 최고 점수 선택 ──
         best_score = -1.0
+        pickup_max_for_log = -1.0  # 임계값 미달이라도 로그용 최고 점수
+        pickup_max_name = ""
         for tmpl_gray, th, tw, name in pickup_templates:
-            if game_binary.shape[0] < th or game_binary.shape[1] < tw:
+            if game_gray.shape[0] < th or game_gray.shape[1] < tw:
                 continue
 
             thresh = PICKUP_THRESHOLDS.get(name, PICKUP_THRESHOLD)
-            result = cv2.matchTemplate(game_binary, tmpl_gray, cv2.TM_CCOEFF_NORMED)
+            result = cv2.matchTemplate(game_gray, tmpl_gray, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, _ = cv2.minMaxLoc(result)
+            if max_val > pickup_max_for_log:
+                pickup_max_for_log = max_val
+                pickup_max_name = name
             locs = np.where(result >= thresh)
 
             for pt in zip(*locs[::-1]):
@@ -235,6 +239,8 @@ def template_process_fn(stop_evt, frame_q, result_q, ready_evt):
             'pickup': pickup_pos,
             'pickup_name': pickup_name,
             'pickup_score': best_score if pickup_pos is not None else 0.0,
+            'pickup_max_score': pickup_max_for_log,
+            'pickup_max_name': pickup_max_name,
             'debug_results': debug_results,
         })
 

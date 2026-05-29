@@ -325,14 +325,13 @@ class BotEngine:
         self._chat_revive_tmpl = _load("chat_revive.png", required=False)
         self._f9_buff_tmpl = _load("f9_buff.png", required=False)
 
-        # 픽업 인라인 매칭용 (subprocess 불필요, 항상 신선한 좌표)
+        # 픽업 인라인 매칭용 (subprocess 불필요, 항상 신선한 좌표) — 그레이스케일 매칭
         self._pickup_tmpls = []
         for f in sorted(glob.glob(os.path.join(BASE_DIR, "templates", "pickup_*.png"))):
             img = cv2.imread(f, cv2.IMREAD_COLOR)
             if img is not None:
                 gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-                _, binary = cv2.threshold(gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
-                self._pickup_tmpls.append((os.path.basename(f), binary))
+                self._pickup_tmpls.append((os.path.basename(f), gray))
         self.log(f"  픽업 인라인 템플릿: {len(self._pickup_tmpls)}개")
 
     # ──────────────────────────────────────────
@@ -551,9 +550,10 @@ class BotEngine:
             time.sleep(delay)
             key_up(key)
 
-    def _ipress(self, key):
+    def _ipress(self, key, wait_lease=True):
         """Lock + focus 확인 + press"""
-        self._wait_for_lease()
+        if wait_lease:
+            self._wait_for_lease()
         with _ilock():
             if not self._ensure_focus():
                 return
@@ -582,8 +582,7 @@ class BotEngine:
         self.log(f"[경고] {key} 입력 실패 — 포커스 미확립 (max_wait={max_wait:.0f}s)")
 
     def _find_pickup_inline(self, frame):
-        """현재 프레임에서 직접 pickup_*.png 매칭 — subprocess 없이 신선한 좌표 반환.
-        test_pickup_pos.py 와 동일 로직."""
+        """현재 프레임에서 직접 pickup_*.png 매칭 — subprocess 없이 신선한 좌표 반환."""
         if not self._pickup_tmpls:
             return None
         if frame.ndim == 3 and frame.shape[2] == 4:
@@ -591,7 +590,6 @@ class BotEngine:
         sx1, sy1, sx2, sy2 = tuple(self.cfg.ocr_scan_rect)
         roi = frame[sy1:sy2, sx1:sx2]
         gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
-        _, gray = cv2.threshold(gray, BINARY_THRESHOLD, 255, cv2.THRESH_BINARY)
         best = None
         for name, tg in self._pickup_tmpls:
             th, tw = tg.shape[:2]
@@ -760,7 +758,7 @@ class BotEngine:
                 return
             self._last_hp_f8_t = now
             self.log(f"[HP] 초록 감지 → F8  (비율={ratio:.2f})")
-            self._ipress("f8")
+            self._ipress("f8", wait_lease=False)
 
     def _check_patrol_hp_escape(self, frame) -> bool:
         """패트롤/전투 중 HP 부족 감지 → F9 세계수 복귀. 트리거 시 True 반환.
