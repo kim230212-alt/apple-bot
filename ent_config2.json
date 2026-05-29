@@ -5,8 +5,8 @@
     1609,
     767
   ],
-  "keyboard_device": 0,
-  "mouse_device": 13,
+  "keyboard_device": 1,
+  "mouse_device": 16,
   "ocr_interval": 0.5,
   "patrol_dist": 500,
   "patrol_dist_up": 200,
@@ -47,10 +47,10 @@
     780,
     769
   ],
-  "mp_bright_threshold": 250,
+  "mp_bright_threshold": 380,
   "mp_wait_timeout": 120,
   "baatu_hp_pos": null,
-  "baatu_hp_threshold": 200,
+  "baatu_hp_threshold": 400,
   "player_pos": [
     636,
     340
