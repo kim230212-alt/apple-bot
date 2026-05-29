@@ -41,14 +41,14 @@ copy ent_config.json           _update_pkg\app\ > nul
 copy ent_config2.json          _update_pkg\app\ > nul
 copy auto_login_config.json    _update_pkg\app\ > nul
 
-:: templates 폴더 복사
-echo 템플릿 복사 중...
-xcopy templates _update_pkg\templates /s /e /y /q > nul
 
-:: Interception 폴더 (있으면 복사)
+:: templates, Interception → app/ 안으로 복사 (런처가 cwd=app/ 로 실행)
+echo 템플릿 복사 중...
+xcopy templates _update_pkg\app\templates /s /e /i /y /q > nul
+
 if exist Interception (
     echo Interception 복사 중...
-    xcopy Interception _update_pkg\Interception /s /e /y /q > nul
+    xcopy Interception _update_pkg\app\Interception /s /e /i /y /q > nul
 )
 
 :: zip 생성 (PowerShell)
@@ -65,7 +65,7 @@ if not exist update.zip (
 )
 
 :: version.json 생성
-echo {"version": "%VER%", "file": "update.zip"} > version.json
+powershell -Command "[System.IO.File]::WriteAllText('version.json', ('{\"version\": \"' + $env:VER + '\", \"file\": \"update.zip\"}'))"
 
 :: 임시 폴더 정리
 rmdir /s /q _update_pkg
@@ -74,7 +74,7 @@ echo.
 echo ============================================
 echo   생성 완료!
 echo.
-echo   update.zip   ^(%.0f KB^)
+echo   update.zip
 echo   version.json ^(버전: %VER%^)
 echo.
 echo   [NAS 업로드 방법]

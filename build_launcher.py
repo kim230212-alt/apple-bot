@@ -20,7 +20,7 @@ def main():
 
     # 도구 설치
     print("[1/4] 도구 설치 중...")
-    run([sys.executable, "-m", "pip", "install", "pyarmor", "pyinstaller", "requests", "-q"])
+    run([sys.executable, "-m", "pip", "install", "pyarmor>=8.0", "pyinstaller", "requests", "-q"])
 
     # 이전 빌드 정리
     for d in ["_armored", "build"]:
@@ -31,7 +31,7 @@ def main():
     if os.path.exists(spec):
         os.remove(spec)
 
-    # PyArmor 난독화
+    # PyArmor 난독화 (8.x: gen 명령)
     print("\n[2/4] PyArmor 난독화 중...")
     run([sys.executable, "-m", "pyarmor.cli", "gen",
          "--output", "_armored",
@@ -41,7 +41,7 @@ def main():
     print("\n[3/4] PyInstaller 빌드 중...")
     armored_entry = os.path.join(BASE_DIR, "_armored", "launcher.py")
 
-    # pyarmor_runtime 폴더 찾기
+    # pyarmor_runtime 폴더 찾기 (8.x)
     runtime_dirs = [
         d for d in os.listdir(os.path.join(BASE_DIR, "_armored"))
         if d.startswith("pyarmor_runtime")
