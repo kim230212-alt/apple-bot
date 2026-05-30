@@ -388,6 +388,8 @@ class BotGUI:
                     self.after(0, lambda: self._setting_vars["keyboard_device"].set(str(kb)))
                 if "mouse_device" in self._setting_vars:
                     self.after(0, lambda: self._setting_vars["mouse_device"].set(str(ms)))
+                if self.engine and self.engine._initialized:
+                    self.engine.apply_devices(kb, ms)
                 self.after(0, self._append_log, f"[디바이스] 갱신  KB={kb}  MS={ms}")
             except Exception as e:
                 self.after(0, self._append_log, f"[디바이스] 오류: {e}")

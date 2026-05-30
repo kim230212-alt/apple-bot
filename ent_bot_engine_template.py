@@ -352,6 +352,15 @@ class BotEngine:
         self._running = False
         self._release_focus_lease()
 
+    def apply_devices(self, kb=None, ms=None):
+        """디바이스 번호 즉시 재적용 — 봇 재시작 없이 keyboard_mouse_check 결과 반영."""
+        if kb is not None:
+            self.cfg.keyboard_device = kb
+        if ms is not None:
+            self.cfg.mouse_device = ms
+        set_devices(keyboard=self.cfg.keyboard_device, mouse=self.cfg.mouse_device)
+        self.log(f"[디바이스] 재적용  KB={self.cfg.keyboard_device}  MS={self.cfg.mouse_device}")
+
     def pause(self):
         self._paused = True
         self.log("일시정지")

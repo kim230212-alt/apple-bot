@@ -216,6 +216,8 @@ class BotPanel(ttk.LabelFrame):
                 self.config.load(self._config_path)
                 kb = self.config.keyboard_device
                 ms = self.config.mouse_device
+                if self.engine and self.engine._initialized:
+                    self.engine.apply_devices(kb, ms)
                 self.after(0, self._append_log, f"[디바이스] 갱신  KB={kb}  MS={ms}")
             except Exception as e:
                 self.after(0, self._append_log, f"[디바이스] 오류: {e}")
