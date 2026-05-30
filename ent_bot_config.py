@@ -12,7 +12,7 @@ import json
 class BotConfig:
     """봇 설정 — 런타임 조정 가능, JSON 저장/로드"""
 
-    def __init__(self, config_path: str | None = None):
+    def __init__(self, config_path: str | None = None, user_config_path: str | None = None):
         # ── 기본값 ──────────────────────────────────
         self.window_title = "Lineage Classic"
 
@@ -148,10 +148,11 @@ class BotConfig:
 
         # ── 로드 ──────────────────────────────────
         self._path = config_path
+        self._user_path = user_config_path
         if config_path and os.path.exists(config_path):
-            self.load(config_path)
+            self.load(config_path, user_config_path)
 
-    # JSON에서 저장/로드할 키 목록
+    # 전체 저장 키
     _PERSIST_KEYS = [
         "patrol_zone", "keyboard_device", "mouse_device",
         "ocr_interval", "patrol_dist", "patrol_dist_up", "max_patrol_steps",
@@ -183,17 +184,31 @@ class BotConfig:
         "patrol_hp_escape_enabled", "patrol_hp_pos", "patrol_hp_threshold",
     ]
 
-    def load(self, path: str):
-        """JSON 파일에서 설정 로드 (존재하는 키만 덮어쓰기)"""
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
+    # 사용자 캘리브레이션 값 — user_config.json에 별도 저장 (업데이트 시 보존)
+    _USER_KEYS = [
+        "patrol_zone", "keyboard_device", "mouse_device", "window_index",
+        "hp_pos", "mp_full_pos", "mp_bright_threshold",
+        "baatu_hp_pos", "baatu_hp_threshold",
+        "depart_hp_pos", "depart_hp_threshold",
+        "patrol_hp_escape_enabled", "patrol_hp_pos", "patrol_hp_threshold",
+        "weight_pos", "weight_bar", "weight_threshold",
+        "scroll_click",
+        "warehouse_npc_click", "warehouse_deposit_click",
+        "warehouse_ok_click", "warehouse_scroll_click",
+        "clan_warehouse_scroll_click", "clan_warehouse_npc_click",
+        "clan_warehouse_deposit_click", "clan_warehouse_ok_click",
+        "player_pos", "chat_rect", "ocr_scan_rect",
+        "use_clan_warehouse", "use_personal_warehouse",
+        "deposit_items",
+        "npc_name", "extra_npc_enabled", "extra_npc_name",
+    ]
+
+    def _apply_dict(self, data: dict):
         for key, val in data.items():
             if hasattr(self, key):
                 cur = getattr(self, key)
-                # tuple 타입이면 tuple로 변환
                 if isinstance(cur, tuple) and isinstance(val, list):
                     val = tuple(val)
-                # 문자열로 된 숫자를 변환
                 if isinstance(val, str):
                     try:
                         val = int(val)
@@ -203,21 +218,38 @@ class BotConfig:
                         except ValueError:
                             pass
                 setattr(self, key, val)
+
+    def load(self, path: str, user_path: str | None = None):
+        """ent_config.json 로드 후 user_config.json 덮어씌우기"""
+        with open(path, encoding="utf-8") as f:
+            self._apply_dict(json.load(f))
         self._path = path
+        self._user_path = user_path
+        if user_path and os.path.exists(user_path):
+            with open(user_path, encoding="utf-8") as f:
+                self._apply_dict(json.load(f))
 
     def save(self, path: str | None = None):
-        """현재 설정을 JSON 파일에 저장"""
-        path = path or self._path
-        if not path:
-            return
-        data = {}
-        for key in self._PERSIST_KEYS:
-            val = getattr(self, key, None)
-            if val is None:
-                continue
-            # tuple → list (JSON 호환)
-            if isinstance(val, tuple):
-                val = list(val)
-            data[key] = val
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        """사용자 설정은 user_config.json에, 나머지는 ent_config.json에 저장"""
+        user_path = path or getattr(self, "_user_path", None)
+        main_path = getattr(self, "_path", None)
+
+        def _dump(keys, fpath):
+            if not fpath:
+                return
+            data = {}
+            for key in keys:
+                val = getattr(self, key, None)
+                if val is None:
+                    continue
+                if isinstance(val, tuple):
+                    val = list(val)
+                data[key] = val
+            with open(fpath, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+        if user_path:
+            _dump(self._USER_KEYS, user_path)
+        else:
+            # user_config 없으면 기존 방식으로 전체 저장
+            _dump(self._PERSIST_KEYS, main_path)

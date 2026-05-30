@@ -47,8 +47,10 @@ LICENSE_CACHE= os.path.join(BASE_DIR, ".lic")
 APP_ENTRY    = os.path.join(APP_DIR, "ent_bot_gui_dual.py")
 UPDATE_ZIP   = os.path.join(BASE_DIR, "_update_tmp.zip")
 
-KEEP_USER_FILES = {"ent_config.json", "ent_config2.json", "auto_login_config.json"}
+KEEP_USER_FILES = {"user_config.json", "user_config2.json", "auto_login_config.json"}
 OFFLINE_GRACE_DAYS = 3
+DEPS_FLAG    = os.path.join(BASE_DIR, ".deps_installed")
+PYTHON_INSTALLER = os.path.join(BASE_DIR, "_python_setup.exe")
 
 # ---------------------------------------------------------------------------
 # Machine ID
@@ -495,21 +497,83 @@ class LauncherApp:
             raise e
 
     # ------------------------------------------------------------------
+    def _ensure_python_and_deps(self) -> bool:
+        """Python + 의존성 설치 확인. 준비 완료 시 True 반환."""
+        python = find_python()
+
+        # Python 미설치 → NAS에서 인스톨러 다운로드
+        if not python:
+            nas_url  = self.cfg.get("nas_url", "").rstrip("/")
+            auth     = (self.cfg.get("username",""), self.cfg.get("password","")) if self.cfg.get("username") else None
+            ans = messagebox.askyesno(
+                "Python 없음",
+                "Python이 설치되어 있지 않습니다.\n\n"
+                "NAS에서 Python 설치 파일을 다운로드하시겠습니까?\n"
+                "(설치 후 런처를 다시 실행하세요)")
+            if not ans:
+                return False
+            try:
+                self._set_status("Python 설치 파일 다운로드 중...")
+                r = requests.get(f"{nas_url}/python_setup.exe", auth=auth,
+                                 stream=True, timeout=120)
+                r.raise_for_status()
+                with open(PYTHON_INSTALLER, "wb") as f:
+                    for chunk in r.iter_content(65536):
+                        f.write(chunk)
+                self._set_status("Python 설치 중...")
+                subprocess.Popen([PYTHON_INSTALLER], shell=True)
+                messagebox.showinfo("안내",
+                    "Python 설치를 완료한 후\n런처를 다시 실행하세요.\n\n"
+                    "설치 시 'Add Python to PATH' 반드시 체크!")
+            except Exception as e:
+                messagebox.showerror("다운로드 오류", str(e))
+            return False
+
+        # Python 있음 + 의존성 미설치 → install_deps.bat 1회 실행 (새 콘솔)
+        if not os.path.exists(DEPS_FLAG):
+            deps_bat = os.path.join(BASE_DIR, "install_deps.bat")
+            if os.path.exists(deps_bat):
+                self._set_status("의존성 설치 중... (최초 1회, 콘솔 창 확인)")
+                self._log("의존성 설치 시작 (install_deps.bat)")
+                proc = subprocess.Popen(
+                    f'cmd /c "{deps_bat}"',
+                    cwd=BASE_DIR,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE,
+                )
+                # 설치 완료 대기 (GUI 블로킹 방지 — 별도 스레드에서 호출됨)
+                proc.wait()
+                if proc.returncode == 0:
+                    open(DEPS_FLAG, "w").close()
+                    self._log("의존성 설치 완료")
+                else:
+                    self.root.after(0, lambda: messagebox.showerror("설치 오류",
+                        "의존성 설치에 실패했습니다.\n"
+                        "install_deps.bat을 직접 실행해 보세요."))
+                    return False
+            else:
+                open(DEPS_FLAG, "w").close()
+
+        return True
+
+    # ------------------------------------------------------------------
     def _launch_app(self):
         if not self._licensed:
             messagebox.showerror("라이선스 오류", "유효한 라이선스가 없습니다.")
             return
-        python = find_python()
-        if not python:
-            messagebox.showerror("Python 없음",
-                "Python을 찾을 수 없습니다.\n"
-                "install_deps.bat을 먼저 실행하세요.")
-            return
         if not os.path.exists(APP_ENTRY):
             messagebox.showerror("앱 없음",
-                f"앱 파일이 없습니다.\n먼저 업데이트를 실행하세요.")
+                "앱 파일이 없습니다.\n먼저 업데이트를 실행하세요.")
             return
+        # deps 설치는 GUI 블로킹 방지를 위해 별도 스레드에서 실행
+        threading.Thread(target=self._launch_app_thread, daemon=True).start()
 
+    def _launch_app_thread(self):
+        if not self._ensure_python_and_deps():
+            return
+        python = find_python()
+        if not python:
+            self.root.after(0, lambda: messagebox.showerror("Python 없음", "Python을 찾을 수 없습니다."))
+            return
         self._log(f"실행: {APP_ENTRY}")
         subprocess.Popen([python, APP_ENTRY], cwd=APP_DIR,
                          creationflags=subprocess.CREATE_NEW_CONSOLE)

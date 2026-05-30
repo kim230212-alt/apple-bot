@@ -54,7 +54,7 @@
     900,
     770
   ],
-  "mp_bright_threshold": 380,
+  "mp_bright_threshold": 250,
   "mp_wait_timeout": 120,
   "baatu_hp_pos": [
     377,

@@ -39,10 +39,11 @@ class BotPanel(ttk.LabelFrame):
     """단일 봇 제어 패널 (Frame 기반)"""
 
     def __init__(self, parent: tk.Widget, config_path: str, bot_name: str,
-                 init_delay: float = 0.0):
+                 init_delay: float = 0.0, user_config_path: str | None = None):
         super().__init__(parent, text=bot_name)
         self._config_path = config_path
-        self.config = BotConfig(config_path)
+        self._user_config_path = user_config_path
+        self.config = BotConfig(config_path, user_config_path)
         self.engine = BotEngine(self.config, log_callback=self._log_threadsafe)
         self._init_delay = init_delay
 
@@ -110,7 +111,7 @@ class BotPanel(ttk.LabelFrame):
         self.config.use_personal_warehouse  = self._personal_wh_var.get()
         self.config.patrol_random           = self._patrol_rand_var.get()
         self.config.extra_npc_enabled       = self._extra_npc_var.get()
-        self.config.save(self._config_path)
+        self.config.save(self._user_config_path or self._config_path)
 
     def _build_log(self):
         self.log_text = scrolledtext.ScrolledText(
@@ -268,6 +269,7 @@ class DualBotGUI:
         self.panel1 = BotPanel(
             pane,
             config_path=os.path.join(BASE_DIR, "ent_config.json"),
+            user_config_path=os.path.join(BASE_DIR, "user_config.json"),
             bot_name="BOT 1  (왼쪽 창)",
             init_delay=0.0,
         )
@@ -277,6 +279,7 @@ class DualBotGUI:
         self.panel2 = BotPanel(
             pane,
             config_path=os.path.join(BASE_DIR, "ent_config2.json"),
+            user_config_path=os.path.join(BASE_DIR, "user_config2.json"),
             bot_name="BOT 2  (오른쪽 창)",
             init_delay=3.0,
         )

@@ -1,0 +1,124 @@
+{
+  "patrol_zone": [
+    297,
+    44,
+    1609,
+    767
+  ],
+  "keyboard_device": 1,
+  "mouse_device": 16,
+  "window_index": 1,
+  "hp_pos": [
+    552,
+    768
+  ],
+  "mp_full_pos": [
+    900,
+    770
+  ],
+  "mp_bright_threshold": 250,
+  "baatu_hp_pos": null,
+  "baatu_hp_threshold": 400,
+  "depart_hp_pos": [
+    322,
+    774
+  ],
+  "depart_hp_threshold": 113,
+  "patrol_hp_escape_enabled": true,
+  "patrol_hp_pos": [
+    377,
+    768
+  ],
+  "patrol_hp_threshold": 400,
+  "weight_pos": [
+    55,
+    866
+  ],
+  "scroll_click": [
+    49,
+    118
+  ],
+  "warehouse_npc_click": [
+    854,
+    342
+  ],
+  "warehouse_deposit_click": [
+    82,
+    230
+  ],
+  "warehouse_ok_click": [
+    288,
+    555
+  ],
+  "warehouse_scroll_click": [
+    82,
+    120
+  ],
+  "clan_warehouse_scroll_click": [
+    60,
+    121
+  ],
+  "clan_warehouse_npc_click": [
+    714,
+    318
+  ],
+  "clan_warehouse_deposit_click": [
+    65,
+    323
+  ],
+  "clan_warehouse_ok_click": [
+    288,
+    555
+  ],
+  "player_pos": [
+    636,
+    340
+  ],
+  "chat_rect": [
+    220,
+    900,
+    520,
+    935
+  ],
+  "ocr_scan_rect": [
+    10,
+    53,
+    1272,
+    696
+  ],
+  "use_clan_warehouse": true,
+  "use_personal_warehouse": true,
+  "deposit_items": [
+    {
+      "name": "엔트의 열매",
+      "enabled": true
+    },
+    {
+      "name": "엔트의 줄기",
+      "enabled": true
+    },
+    {
+      "name": "정령의 돌",
+      "enabled": true
+    },
+    {
+      "name": "버섯포자의 즙",
+      "enabled": true
+    },
+    {
+      "name": "미스릴 원석",
+      "enabled": true
+    },
+    {
+      "name": "엔트의 껍질",
+      "enabled": true
+    },
+    {
+      "name": "판의 갈기털",
+      "enabled": true
+    }
+  ],
+  "npc_name": "엔트",
+  "extra_npc_enabled": true,
+  "extra_npc_name": "판"
+}

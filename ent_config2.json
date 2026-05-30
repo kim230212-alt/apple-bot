@@ -44,10 +44,10 @@
   "hp_check_interval": 10.0,
   "hp_f8_cooldown": 3.0,
   "mp_full_pos": [
-    780,
-    769
+    900,
+    770
   ],
-  "mp_bright_threshold": 380,
+  "mp_bright_threshold": 250,
   "mp_wait_timeout": 120,
   "baatu_hp_pos": null,
   "baatu_hp_threshold": 400,
@@ -143,5 +143,8 @@
   "stuck_no_move_max": 8,
   "window_index": 1,
   "extra_npc_enabled": true,
-  "extra_npc_name": "판"
+  "extra_npc_name": "판",
+  "patrol_hp_escape_enabled": true,
+  "patrol_hp_pos": [377, 768],
+  "patrol_hp_threshold": 400
 }
