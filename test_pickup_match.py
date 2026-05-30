@@ -6,6 +6,7 @@
 
 조작:
   스페이스 : 현재 프레임 스캔 + 결과 출력
+  +/-      : 기본 임계값 0.01 단위 조절
   S        : 스캔 + debug_pickup/ 에 디버그 이미지 저장
   Q        : 종료
 """
@@ -27,6 +28,8 @@ CONFIG_PATH = os.path.join(BASE_DIR, "ent_config.json")
 
 # template_scanner.py 와 동일한 임계값
 PICKUP_THRESHOLDS = {
+    "pickup_008.png": 0.80,   # 오크 아이템 오매칭 방지
+    "pickup_009.png": 0.80,   # 오크 아이템 오매칭 방지
     "pickup_012.png": 0.80,   # 마력의 돌 — 화살 오매칭 방지
 }
 DEFAULT_THRESHOLD = 0.72
@@ -39,17 +42,17 @@ def load_templates():
         img = cv2.imread(f, cv2.IMREAD_GRAYSCALE)
         if img is not None:
             name = os.path.basename(f)
-            thr  = PICKUP_THRESHOLDS.get(name, DEFAULT_THRESHOLD)
-            tmpls.append((name, img, thr))
-            print(f"  로드: {name}  {img.shape[1]}x{img.shape[0]}  thr={thr}")
+            tmpls.append((name, img))
+            print(f"  로드: {name}  {img.shape[1]}x{img.shape[0]}")
     return tmpls
 
-def scan(frame, templates):
+def scan(frame, templates, default_thr):
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     best_score, best_name, best_pos = 0.0, None, None
     all_hits = []
 
-    for name, tmpl, thr in templates:
+    for name, tmpl in templates:
+        thr = PICKUP_THRESHOLDS.get(name, default_thr)
         th, tw = tmpl.shape[:2]
         if gray.shape[0] < th or gray.shape[1] < tw:
             continue
@@ -94,11 +97,13 @@ def main():
 
     print("\n=== 조작 ===")
     print("  SPACE : 스캔 + 결과 출력")
+    print("  +/-   : 기본 임계값 0.01 단위 조절")
     print("  S     : 스캔 + 디버그 이미지 저장")
     print("  Q     : 종료")
     print("\n창에 포커스 두고 조작하세요.\n")
 
     cv2.namedWindow("pickup_test", cv2.WINDOW_NORMAL)
+    default_thr = DEFAULT_THRESHOLD
 
     while True:
         frame = wincap.get_screenshot()
@@ -106,16 +111,25 @@ def main():
             time.sleep(0.05)
             continue
 
-        cv2.imshow("pickup_test", frame)
+        disp = frame.copy()
+        cv2.putText(disp, f"threshold={default_thr:.2f}  (+/-조절  SPACE=스캔  S=저장  Q=종료)",
+                    (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+        cv2.imshow("pickup_test", disp)
         key = cv2.waitKey(30) & 0xFF
 
         if key == ord('q'):
             break
+        elif key in (ord('+'), ord('=')):
+            default_thr = round(min(1.0, default_thr + 0.01), 2)
+            print(f"[THR] threshold → {default_thr:.2f}")
+        elif key == ord('-'):
+            default_thr = round(max(0.0, default_thr - 0.01), 2)
+            print(f"[THR] threshold → {default_thr:.2f}")
         elif key in (ord(' '), ord('s')):
             save = (key == ord('s'))
-            hits, best_name, best_score, best_pos = scan(frame, templates)
+            hits, best_name, best_score, best_pos = scan(frame, templates, default_thr)
 
-            print(f"\n[스캔] ──────────────────────────")
+            print(f"\n[스캔] threshold={default_thr:.2f} ──────────────────────────")
             for (name, score, cx, cy, loc, tw, th) in hits:
                 hit = "HIT " if loc is not None else "miss"
                 print(f"  {hit}  {name:20s}  score={score:.3f}  pos=({cx},{cy})" if loc else

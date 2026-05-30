@@ -5,7 +5,7 @@
     1609,
     767
   ],
-  "keyboard_device": 2,
+  "keyboard_device": 1,
   "mouse_device": 10,
   "ocr_interval": 0.5,
   "patrol_dist": 500,
@@ -157,5 +157,10 @@
     377,
     768
   ],
-  "patrol_hp_threshold": 400
+  "patrol_hp_threshold": 400,
+  "depart_hp_pos": [
+    322,
+    774
+  ],
+  "depart_hp_threshold": 113
 }

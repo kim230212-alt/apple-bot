@@ -1003,58 +1003,64 @@ class BotEngine:
         self.log(f"    맡기기 결과: 성공 {sorted(deposited)}  미발견 {missing}")
 
     def _do_baatu_until_mp_ready(self, tag: str = "RETURN"):
-        """바투(F5) 반복: HP 충분할 때만 F5, MP 찰 때까지 (3초 간격)."""
-        mp_timeout  = float(getattr(self.cfg, "mp_wait_timeout", 120))
-        mp_thr      = int(getattr(self.cfg, "mp_bright_threshold", 250))
-        mx, my      = self.cfg.mp_full_pos
-        hp_pos      = getattr(self.cfg, "baatu_hp_pos", None)
-        hp_thr      = int(getattr(self.cfg, "baatu_hp_threshold", 200))
-        deadline    = time.time() + mp_timeout
-        attempt     = 0
-        mp_ready    = False
+        """HP+MP 회복 대기. HP 부족 → 3초 대기. HP 충분+MP 부족 → 바투(F5). HP+MP 충분 → 출발."""
+        mp_timeout   = float(getattr(self.cfg, "mp_wait_timeout", 120))
+        mp_thr       = int(getattr(self.cfg, "mp_bright_threshold", 250))
+        mx, my       = self.cfg.mp_full_pos
+        # 바투 스킵 기준 HP
+        hp_pos       = getattr(self.cfg, "baatu_hp_pos", None)
+        hp_thr       = int(getattr(self.cfg, "baatu_hp_threshold", 200))
+        # 출발 기준 HP (미설정 시 baatu 기준 사용)
+        dep_hp_pos   = getattr(self.cfg, "depart_hp_pos", None) or hp_pos
+        dep_hp_thr   = int(getattr(self.cfg, "depart_hp_threshold", 200)) if getattr(self.cfg, "depart_hp_pos", None) else hp_thr
+        deadline     = time.time() + mp_timeout
+        attempt      = 0
+        mp_ready     = False
         while self._running and time.time() < deadline:
             frame = self._wincap.get_screenshot()
             fh, fw = (frame.shape[:2] if frame is not None else (0, 0))
-            # HP 체크
+            # HP 체크: 부족하면 바투 없이 대기
             if hp_pos and frame is not None:
-                hx, hy = hp_pos
+                hx, hy = int(hp_pos[0]), int(hp_pos[1])
                 if 0 <= hx < fw and 0 <= hy < fh:
                     hb, hg, hr = int(frame[hy, hx][0]), int(frame[hy, hx][1]), int(frame[hy, hx][2])
                     hp_bright = hb + hg + hr
                     self.log(f"[{tag}] HP 픽셀 ({hx},{hy}) BGR=({hb},{hg},{hr}) 합={hp_bright}")
                     if hp_bright > hp_thr:
-                        self.log(f"[{tag}] HP 부족 → 바투 스킵, 3초 대기")
+                        self.log(f"[{tag}] HP 부족 → 3초 대기 (바투 없음)")
                         self._interruptible_sleep(3)
-                        if frame is not None and 0 <= mx < fw and 0 <= my < fh:
-                            b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
-                            mp_bright_skip = b + g + r
-                            self.log(f"[{tag}] MP 픽셀 ({mx},{my}) BGR=({b},{g},{r}) 합={mp_bright_skip} (HP스킵 중 확인)")
-                            if mp_bright_skip < mp_thr:
-                                self.log(f"[{tag}] MP 충분 → 바투 종료")
-                                mp_ready = True
-                        if mp_ready:
-                            break
                         continue
-            # HP 충분 → 바투
+            # HP 충분 → MP 체크
+            if frame is not None and 0 <= mx < fw and 0 <= my < fh:
+                b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
+                mp_bright = b + g + r
+                self.log(f"[{tag}] MP 픽셀 ({mx},{my}) BGR=({b},{g},{r}) 합={mp_bright}")
+                if mp_bright < mp_thr:
+                    # MP 충분 → 출발 기준 HP 확인
+                    dep_ok = True
+                    if dep_hp_pos and frame is not None:
+                        dx, dy = int(dep_hp_pos[0]), int(dep_hp_pos[1])
+                        if 0 <= dx < fw and 0 <= dy < fh:
+                            db, dg, dr = int(frame[dy, dx][0]), int(frame[dy, dx][1]), int(frame[dy, dx][2])
+                            dep_bright = db + dg + dr
+                            self.log(f"[{tag}] 출발HP 픽셀 ({dx},{dy}) BGR=({db},{dg},{dr}) 합={dep_bright} thr={dep_hp_thr}")
+                            if dep_bright > dep_hp_thr:
+                                self.log(f"[{tag}] MP 충분, 출발 HP 아직 부족 → 3초 대기")
+                                dep_ok = False
+                    if dep_ok:
+                        self.log(f"[{tag}] HP+MP 충분 → 출발")
+                        mp_ready = True
+                        break
+                    # MP 충분하나 HP 부족 → 바투 없이 대기
+                    self._interruptible_sleep(3)
+                    continue
+            # MP 부족 → 바투
             attempt += 1
             self._ikey_force("f5")
             self.log(f"[{tag}] 바투(F5) #{attempt}")
             self._interruptible_sleep(3)
-            if not self._running:
-                return
-            frame = self._wincap.get_screenshot()
-            if frame is not None:
-                fh, fw = frame.shape[:2]
-                if 0 <= mx < fw and 0 <= my < fh:
-                    b, g, r = int(frame[my, mx][0]), int(frame[my, mx][1]), int(frame[my, mx][2])
-                    bright = b + g + r
-                    self.log(f"[{tag}] MP 픽셀 ({mx},{my}) BGR=({b},{g},{r}) 합={bright}")
-                    if bright < mp_thr:
-                        self.log(f"[{tag}] MP 충분 (합={bright}<{mp_thr})")
-                        mp_ready = True
-                        break
         if not mp_ready:
-            self.log(f"[{tag}] MP 대기 시간 초과 → 그냥 진행")
+            self.log(f"[{tag}] 대기 시간 초과 → 그냥 진행")
 
     def _do_f9_return(self):
         """F9 → 마을 복귀 + 바투 루프. _f11_to_zone / _scroll_return 공용."""
@@ -1419,14 +1425,6 @@ class BotEngine:
                         self.log(f"[DIALOG] ESC 후 재공격  pos={self.npc_pos}")
                     continue
 
-            # ── HP 초록 감지 → F8 ──
-            self._check_hp_green_and_press(frame)
-
-            # ── HP 부족 → F9 세계수 복귀 ──
-            if self.state in ("PATROL", "APPROACH", "FIGHTING"):
-                if self._check_patrol_hp_escape(frame):
-                    continue
-
             # ── 무게 초과 ──
             if self.state in ("PATROL", "FIGHTING") and self._check_weight_over(frame):
                 self._run_warehouse()
@@ -1435,10 +1433,18 @@ class BotEngine:
                 self._set_state("PATROL")
                 continue
 
+            # ── HP 초록 감지 → F8 ──
+            self._check_hp_green_and_press(frame)
+
+            # ── HP 부족 → F9 세계수 복귀 ──
+            if self.state in ("PATROL", "APPROACH", "FIGHTING"):
+                if self._check_patrol_hp_escape(frame):
+                    continue
+
             # ── 30초마다 요정 숲 체크 ──
             if (self._zone_tmpl is not None
                     and self.state in ("PATROL", "APPROACH", "FIGHTING")
-                    and now - self._last_zone_check_t >= 30.0):
+                    and now - self._last_zone_check_t >= 10.0):
                 self._last_zone_check_t = now
                 if not self._is_in_zone(frame):
                     self.log("[ZONE] 요정 숲 이탈 감지 → F9 복귀")

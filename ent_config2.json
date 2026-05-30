@@ -51,6 +51,8 @@
   "mp_wait_timeout": 120,
   "baatu_hp_pos": null,
   "baatu_hp_threshold": 400,
+  "depart_hp_pos": [322, 774],
+  "depart_hp_threshold": 113,
   "player_pos": [
     636,
     340

@@ -23,6 +23,8 @@ BINARY_THRESHOLD = 128
 
 # 템플릿별 임계값 오버라이드
 PICKUP_THRESHOLDS = {
+    "pickup_008.png": 0.80,   # 오크 아이템 오매칭 방지
+    "pickup_009.png": 0.80,   # 오크 아이템 오매칭 방지
     "pickup_012.png": 0.80,   # 마력의 돌 — 화살 오매칭 방지
 }
 

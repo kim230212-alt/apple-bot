@@ -60,6 +60,10 @@ class BotConfig:
         self.baatu_hp_pos = None
         self.baatu_hp_threshold = 200
 
+        # 출발(F11) 전 HP 기준 (미설정 시 baatu_hp_pos/threshold 사용)
+        self.depart_hp_pos = None
+        self.depart_hp_threshold = 200
+
         # 패트롤/전투 중 HP 부족 → F9 세계수 복귀
         self.patrol_hp_escape_enabled = False
         self.patrol_hp_pos = None        # 감시 픽셀 좌표 [x, y]
@@ -162,6 +166,7 @@ class BotConfig:
         "hp_pos", "hp_check_interval", "hp_f8_cooldown",
         "mp_full_pos", "mp_bright_threshold", "mp_wait_timeout",
         "baatu_hp_pos", "baatu_hp_threshold",
+        "depart_hp_pos", "depart_hp_threshold",
         "player_pos", "chat_rect", "ocr_scan_rect",
         "npc_name", "pickup_keyword", "pickup_conf",
         "warehouse_npc_click", "warehouse_deposit_click",

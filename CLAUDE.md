@@ -344,6 +344,37 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - `mp_bright_threshold` 250 → **380** (Bot2에도 ent_config.json 과 동일 교정값 적용)
 - `baatu_hp_threshold` 200 → **400** (동일)
 
+### 2026-05-30 작업 (2차)
+
+#### 우선순위 및 zone 체크 주기 조정 (`ent_bot_engine_template.py`)
+- **무게 초과 체크 1순위로 변경**: 기존 HP 체크 → 무게 → 순서를 무게 → HP 초록 F8 → HP 부족 F9 순으로 변경
+- **요정 숲 zone 확인 주기 30초 → 10초**: `now - self._last_zone_check_t >= 30.0` → `10.0`
+
+#### `_do_baatu_until_mp_ready` 로직 전면 재설계 (`ent_bot_engine_template.py`)
+- **기존 문제**: HP/MP 둘 다 보이면 즉시 출발(바투 없이) → HP 미회복 상태로 사냥터 진입
+- **새 흐름**:
+  1. HP 부족 → 3초 대기만 (바투 없음)
+  2. HP 충분 + MP 부족 → 바투(F5)
+  3. MP 충분 + 출발 HP 부족 → 3초 대기 (바투 없음)
+  4. HP+MP 충분 → 출발
+
+#### 출발 전용 HP 임계값 추가
+- **`depart_hp_pos`**, **`depart_hp_threshold`** 신규 config 키 (`ent_bot_config.py`, `_PERSIST_KEYS` 등록)
+  - 미설정 시 `baatu_hp_pos/threshold` 폴백
+  - `ent_config.json`: `depart_hp_pos=[322,774]`, `depart_hp_threshold=113`
+  - `ent_config2.json`: 동일 값 적용
+- **`test_depart_hp.py`** 신규: 출발 HP 기준 픽셀 설정 도구
+  - 클릭 시 현재 픽셀 bright+50으로 threshold 자동 설정
+  - `+/-` 키로 10단위 미세 조정, S키 저장
+
+#### 픽업 오매칭 임계값 조정 (`template_scanner.py`, `test_pickup_match.py`)
+- `pickup_008.png`, `pickup_009.png` → 0.80 (오크 아이템 오매칭 방지, 실측 score 0.742~0.761)
+- 테스트 후 정상 아이템 0.80 이상 확인 완료
+
+#### `test_pickup_match.py` 개선
+- `+/-` 키로 기본 threshold 실시간 조절 (0.01 단위)
+- 화면 상단에 현재 threshold 표시
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘
