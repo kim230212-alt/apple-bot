@@ -401,6 +401,24 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - 달력 팝업 날짜 선택 (tkcalendar)
 - 로컬 저장 버튼 제거
 
+### 2026-05-30 작업 (4차) — 디바이스 설정 즉시 반영 + NAS 폴백
+
+#### 디바이스 설정 즉시 반영 (`apply_devices()`)
+- **문제**: `keyboard_mouse_check.py` 저장 후 엔진의 `set_devices()` 미호출 → 봇 재시작 없이는 변경된 KB/MS 번호가 적용되지 않음
+- **수정**:
+  - `ent_bot_engine_template.py`: `apply_devices(kb, ms)` 메서드 추가 — cfg 값 업데이트 + `set_devices()` 즉시 호출
+  - `ent_bot_gui_dual.py`, `ent_bot_gui_template.py`: `_on_kb_test` 완료 후 `engine.apply_devices()` 호출
+
+#### keyboard_mouse_check.py — user_config 우선 저장
+- **문제**: `keyboard_device`/`mouse_device`가 `_USER_KEYS`에 있어 `user_config.json`에 저장되는 구조인데, `keyboard_mouse_check.py`는 `ent_config.json`에만 저장 → `user_config.json`이 우선순위라 변경 무효
+- **수정**: `user_config.json` 있으면 거기에 저장, 없으면 `ent_config.json` 폴백
+  - `_CONFIG_PAIRS = [("user_config.json", "ent_config.json"), ("user_config2.json", "ent_config2.json")]`
+
+#### Launcher NAS URL 폴백 (`launcher.py`)
+- **문제**: 집에서 외부 DDNS(`dh2302.synology.me`)로 접근 시 NAT 헤어핀 미지원 라우터에서 연결 실패
+- **수정**: `resolve_nas_url()` 추가 — `nas_url` 5초 타임아웃 실패 시 `nas_url_fallback` 자동 시도
+- `launcher_config.json`에 `nas_url_fallback: "http://192.168.55.10/update"` 추가
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘

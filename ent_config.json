@@ -6,7 +6,7 @@
     767
   ],
   "keyboard_device": 1,
-  "mouse_device": 10,
+  "mouse_device": 16,
   "ocr_interval": 0.5,
   "patrol_dist": 500,
   "patrol_dist_up": 200,
