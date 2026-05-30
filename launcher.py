@@ -154,6 +154,23 @@ def load_config() -> dict:
             return json.load(f)
     return {}
 
+def resolve_nas_url(cfg: dict, log_fn=None) -> str:
+    """primary nas_url 접속 실패 시 nas_url_fallback 시도 후 동작하는 URL 반환."""
+    primary  = cfg.get("nas_url", "").rstrip("/")
+    fallback = cfg.get("nas_url_fallback", "").rstrip("/")
+    auth     = (cfg["username"], cfg["password"]) if cfg.get("username") else None
+
+    for url in [u for u in [primary, fallback] if u]:
+        try:
+            requests.get(f"{url}/version.json", auth=auth, timeout=5)
+            if log_fn and url != primary:
+                log_fn(f"[NAS] 폴백 URL 사용: {url}")
+            return url
+        except Exception:
+            if log_fn and fallback and url == primary:
+                log_fn(f"[NAS] {url} 접속 실패 → 폴백 시도...")
+    return primary  # 둘 다 실패 → 오프라인 처리로 넘김
+
 def get_current_version() -> str:
     if os.path.exists(VERSION_FILE):
         return open(VERSION_FILE, encoding="utf-8").read().strip()
@@ -344,17 +361,17 @@ class LauncherApp:
         self._set_busy(True)
         self._set_launch_enabled(False)
 
-        nas_url  = self.cfg.get("nas_url", "").rstrip("/")
-        username = self.cfg.get("username", "")
-        password = self.cfg.get("password", "")
-        auth     = (username, password) if username else None
-
-        if not nas_url:
+        if not self.cfg.get("nas_url"):
             self._log("[오류] launcher_config.json에 nas_url이 없습니다.")
             self._set_status("설정 필요")
             self._set_busy(False)
             self._updating = False
             return
+
+        nas_url  = resolve_nas_url(self.cfg, self._log)
+        username = self.cfg.get("username", "")
+        password = self.cfg.get("password", "")
+        auth     = (username, password) if username else None
 
         # ── 1. 라이선스 체크 ────────────────────────────────────────
         self._set_status("라이선스 확인 중...")
