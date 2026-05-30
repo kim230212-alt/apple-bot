@@ -1018,6 +1018,8 @@ class BotEngine:
         mp_ready     = False
         while self._running and time.time() < deadline:
             frame = self._wincap.get_screenshot()
+            if frame is not None and self._check_restart(frame):
+                return
             fh, fw = (frame.shape[:2] if frame is not None else (0, 0))
             # HP 체크: 부족하면 바투 없이 대기
             if hp_pos and frame is not None:
@@ -1064,6 +1066,8 @@ class BotEngine:
 
     def _do_f9_return(self):
         """F9 → 마을 복귀 + 바투 루프. _f11_to_zone / _scroll_return 공용."""
+        if self._dead_check():
+            return
         self.log("[RETURN] F9 실행 → 3초 대기")
         self._ikey_force("f9")
         self._interruptible_sleep(3)
@@ -1090,12 +1094,16 @@ class BotEngine:
         for retry in range(max_retry):
             if not self._running:
                 return
+            if self._dead_check():
+                return
             self.log(f"[F11] 순간이동 시도 ({retry+1}/{max_retry})")
             self._ikey_force("f11")
             self._interruptible_sleep(2)
             if not self._running:
                 return
             frame = self._wincap.get_screenshot()
+            if frame is not None and self._check_restart(frame):
+                return
             if frame is None or self._is_in_zone(frame):
                 self.log("[F11] 요정 숲 확인 완료")
                 return
@@ -1103,10 +1111,19 @@ class BotEngine:
             self._do_f9_return()
         self.log("[F11] 최대 재시도 초과 → 현재 위치에서 진행")
 
+    def _dead_check(self) -> bool:
+        """Restart 버튼 감지 시 즉시 사망 처리. True면 호출측은 즉시 return."""
+        frame = self._wincap.get_screenshot()
+        if frame is not None and self._check_restart(frame):
+            return True
+        return False
+
     def _scroll_return(self):
         max_retry = 5
         for retry in range(max_retry):
             if not self._running:
+                return
+            if self._dead_check():
                 return
             self._do_f9_return()
             if not self._running:

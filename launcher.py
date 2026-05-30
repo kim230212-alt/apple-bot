@@ -105,9 +105,11 @@ def check_license(nas_url: str, auth) -> tuple[str, str]:
         r.raise_for_status()
         licenses: dict = r.json()
 
-        expire_str = licenses.get(mid) or licenses.get("*")
-        if not expire_str:
+        entry = licenses.get(mid) or licenses.get("*")
+        if not entry:
             return LicenseResult.UNKNOWN, mid
+        # {"expire": "YYYY-MM-DD", "name": "PC명"} 또는 "YYYY-MM-DD" 둘 다 지원
+        expire_str = entry["expire"] if isinstance(entry, dict) else entry
 
         expire = datetime.date.fromisoformat(expire_str)
         if today > expire:
