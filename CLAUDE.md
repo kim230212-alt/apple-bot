@@ -375,6 +375,32 @@ run_dual.bat                   # 듀얼 버전 관리자 권한 자동 실행
 - `+/-` 키로 기본 threshold 실시간 조절 (0.01 단위)
 - 화면 상단에 현재 threshold 표시
 
+### 2026-05-30 작업 (3차) — 런처 배포 안정화
+
+#### 사망 감지 우선화 (복귀 루프 내 Restart 즉시 처리)
+- `_dead_check()` 신규: 프레임 캡처 후 `_check_restart` 호출 헬퍼
+- `_scroll_return`, `_do_f9_return`, `_f11_to_zone`, `_do_baatu_until_mp_ready` 모든 블로킹 구간에 `_dead_check()` 추가
+
+#### 런처 배포 안정화 (`launcher.py`)
+- `_launch_app` → 별도 스레드(`_launch_app_thread`) 분리 (GUI 응답없음 해결)
+- `_ensure_python_and_deps()`:
+  - `install_deps.bat` 대신 **직접 pip 설치** (PATH 무관, 찾은 Python 경로 사용)
+  - Interception 드라이버 자동 설치 + 재부팅 안내
+  - `.deps_installed` 플래그로 최초 1회만 실행
+- 봇 실행 시 **TCL_LIBRARY / TK_LIBRARY 강제 지정** (시스템 Tcl 버전 충돌 방지)
+- 봇 크래시 감지: 3초 대기 후 `proc.poll()` → stderr를 `bot_error.log`에 기록 후 팝업 표시
+- KEEP_USER_FILES: `ent_config*.json` → `user_config*.json` 으로 변경
+
+#### 배포 구조 개선
+- `build_update.bat`: Interception 폴더 루트에 복사, `install_deps.bat` zip 포함, `user_config*.json` 신규 사용자용 포함
+- `install_deps.bat`: Interception 경로 `command line installer` 하위 폴더로 수정
+
+#### license_manager.py 개선
+- NAS 다운로드 URL을 `nas_file_path`에서 자동 추출 (`/web` prefix 제거)
+- Synology File Station API 업로드 (DSM 포트 5000/5001)
+- 달력 팝업 날짜 선택 (tkcalendar)
+- 로컬 저장 버튼 제거
+
 ### 미해결: 2페이지 버튼 클릭 안 됨 (이전부터)
 - 템플릿 매칭은 정상 (신뢰도 1.0으로 위치 찾음)
 - `grab_frame`(BitBlt)으로 찾은 좌표로 `click_at` 하면 클릭이 안 먹힘

@@ -529,29 +529,46 @@ class LauncherApp:
                 messagebox.showerror("다운로드 오류", str(e))
             return False
 
-        # Python 있음 + 의존성 미설치 → install_deps.bat 1회 실행 (새 콘솔)
+        # Python 있음 + 의존성 미설치 → 직접 pip 설치 (PATH 무관)
         if not os.path.exists(DEPS_FLAG):
-            deps_bat = os.path.join(BASE_DIR, "install_deps.bat")
-            if os.path.exists(deps_bat):
-                self._set_status("의존성 설치 중... (최초 1회, 콘솔 창 확인)")
-                self._log("의존성 설치 시작 (install_deps.bat)")
-                proc = subprocess.Popen(
-                    f'cmd /c "{deps_bat}"',
-                    cwd=BASE_DIR,
+            self._set_status("의존성 설치 중... (최초 1회)")
+            self._log(f"pip 패키지 설치 중 (python: {python})")
+            packages = [
+                "numpy", "opencv-python", "pywin32", "keyboard",
+                "dxcam", "Pillow", "requests", "interception-python",
+            ]
+            pip_proc = subprocess.Popen(
+                [python, "-m", "pip", "install", "--upgrade"] + packages,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+            )
+            pip_proc.wait()
+            if pip_proc.returncode != 0:
+                self.root.after(0, lambda: messagebox.showerror("설치 오류",
+                    "패키지 설치에 실패했습니다.\n"
+                    "Python이 정상 설치됐는지 확인하세요."))
+                return False
+
+            # Interception 드라이버 설치
+            interception_exe = os.path.join(BASE_DIR, "Interception",
+                                            "command line installer",
+                                            "install-interception.exe")
+            if os.path.exists(interception_exe):
+                self._log("Interception 드라이버 설치 중...")
+                icp = subprocess.Popen(
+                    [interception_exe, "/install"],
                     creationflags=subprocess.CREATE_NEW_CONSOLE,
                 )
-                # 설치 완료 대기 (GUI 블로킹 방지 — 별도 스레드에서 호출됨)
-                proc.wait()
-                if proc.returncode == 0:
-                    open(DEPS_FLAG, "w").close()
-                    self._log("의존성 설치 완료")
-                else:
-                    self.root.after(0, lambda: messagebox.showerror("설치 오류",
-                        "의존성 설치에 실패했습니다.\n"
-                        "install_deps.bat을 직접 실행해 보세요."))
-                    return False
+                icp.wait()
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "재부팅 필요",
+                    "Interception 드라이버가 설치됐습니다.\n\n"
+                    "재부팅 후 런처를 다시 실행하세요."))
             else:
-                open(DEPS_FLAG, "w").close()
+                self._log("[경고] Interception 폴더 없음 — 드라이버 수동 설치 필요")
+
+            open(DEPS_FLAG, "w").close()
+            self._log("의존성 설치 완료")
+            return False  # 재부팅 안내 후 종료
 
         return True
 
@@ -575,9 +592,40 @@ class LauncherApp:
             self.root.after(0, lambda: messagebox.showerror("Python 없음", "Python을 찾을 수 없습니다."))
             return
         self._log(f"실행: {APP_ENTRY}")
-        subprocess.Popen([python, APP_ENTRY], cwd=APP_DIR,
-                         creationflags=subprocess.CREATE_NEW_CONSOLE)
-        self.root.after(800, self.root.destroy)
+        log_path = os.path.join(BASE_DIR, "bot_error.log")
+        try:
+            # Tcl 버전 충돌 방지: Python 자체 Tcl/Tk 경로로 강제 지정
+            import sysconfig
+            env = os.environ.copy()
+            py_dir = os.path.dirname(python)
+            tcl_lib = os.path.join(py_dir, "tcl", "tcl8.6")
+            tk_lib  = os.path.join(py_dir, "tcl", "tk8.6")
+            if os.path.isdir(tcl_lib):
+                env["TCL_LIBRARY"] = tcl_lib
+            if os.path.isdir(tk_lib):
+                env["TK_LIBRARY"] = tk_lib
+
+            log_f = open(log_path, "w", encoding="utf-8")
+            proc = subprocess.Popen(
+                [python, APP_ENTRY], cwd=APP_DIR,
+                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                stderr=log_f, env=env,
+            )
+            log_f.close()
+        except Exception as e:
+            self.root.after(0, lambda: messagebox.showerror("실행 오류", str(e)))
+            return
+        import time as _time
+        _time.sleep(3)
+        if proc.poll() is not None:
+            try:
+                err_txt = open(log_path, encoding="utf-8").read().strip()[-800:]
+            except Exception:
+                err_txt = "(로그 없음)"
+            msg = f"봇이 즉시 종료됐습니다 (exit={proc.returncode}).\n\n{err_txt}"
+            self.root.after(0, lambda m=msg: messagebox.showerror("봇 실행 실패", m))
+            return
+        self.root.after(0, self.root.destroy)
 
     # ------------------------------------------------------------------
     def run(self):

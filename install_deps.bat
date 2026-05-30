@@ -52,8 +52,13 @@ echo 패키지 설치 완료
 :: Interception 드라이버 설치
 echo.
 echo [4/4] Interception 드라이버 설치 중...
-if exist "Interception\install-interception.exe" (
-    Interception\install-interception.exe /install
+if exist "Interception\command line installer\install-interception.exe" (
+    "Interception\command line installer\install-interception.exe" /install
+    echo Interception 드라이버 설치 완료
+    echo.
+    echo [중요] 드라이버 적용을 위해 재부팅이 필요합니다.
+) else if exist "Interception\install-interception.exe" (
+    "Interception\install-interception.exe" /install
     echo Interception 드라이버 설치 완료
     echo.
     echo [중요] 드라이버 적용을 위해 재부팅이 필요합니다.

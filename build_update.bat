@@ -42,14 +42,22 @@ copy ent_config2.json          _update_pkg\app\ > nul
 copy auto_login_config.json    _update_pkg\app\ > nul
 
 
-:: templates, Interception → app/ 안으로 복사 (런처가 cwd=app/ 로 실행)
+:: templates → app/ 안으로 복사
 echo 템플릿 복사 중...
 xcopy templates _update_pkg\app\templates /s /e /i /y /q > nul
 
+:: Interception → 루트에 복사 (install_deps.bat이 루트에서 실행됨)
 if exist Interception (
     echo Interception 복사 중...
-    xcopy Interception _update_pkg\app\Interception /s /e /i /y /q > nul
+    xcopy Interception _update_pkg\Interception /s /e /i /y /q > nul
 )
+
+:: install_deps.bat → 루트에 복사 (업데이트 시 갱신)
+copy install_deps.bat _update_pkg\ > nul
+
+:: user_config 기본값 → 신규 사용자용 (기존 사용자는 런처가 보존)
+copy user_config.json  _update_pkg\app\ > nul
+copy user_config2.json _update_pkg\app\ > nul
 
 :: zip 생성 (PowerShell)
 echo.
